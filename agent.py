@@ -6,6 +6,7 @@ from livekit import agents, rtc
 from livekit.agents import Agent, AgentServer, AgentSession, room_io
 from livekit.plugins import google, noise_cancellation, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
+from google.genai import types as genai_types
 
 load_dotenv(".env")
 
@@ -28,7 +29,14 @@ async def my_agent(ctx: agents.JobContext):
 
     session = AgentSession(
         stt="assemblyai/universal-streaming",
-        llm=google.LLM(model="gemini-2.5-flash"),
+        llm=google.LLM(
+        model="gemini-3-flash-preview",
+        temperature=0.8,
+        thinking_config=genai_types.ThinkingConfig(
+            thinking_level=genai_types.ThinkingLevel.MEDIUM,
+            include_thoughts=True,
+        )
+        ),
         tts="inworld/inworld-tts-1.5-max",
         vad=silero.VAD.load(),
         turn_detection=MultilingualModel(),
