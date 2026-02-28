@@ -1,8 +1,10 @@
+import os
+
 from dotenv import load_dotenv
 
 from livekit import agents, rtc
-from livekit.agents import AgentServer,AgentSession, Agent, room_io
-from livekit.plugins import noise_cancellation, silero
+from livekit.agents import Agent, AgentServer, AgentSession, room_io
+from livekit.plugins import google, noise_cancellation, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 load_dotenv(".env")
@@ -21,9 +23,12 @@ server = AgentServer()
 
 @server.rtc_session(agent_name="my-agent")
 async def my_agent(ctx: agents.JobContext):
+    if not os.getenv("GOOGLE_API_KEY"):
+        raise RuntimeError("GOOGLE_API_KEY is required for the Google Gemini LLM.")
+
     session = AgentSession(
         stt="assemblyai/universal-streaming",
-        llm="gemini-3.1-pro-preview",
+        llm=google.LLM(model="gemini-2.5-flash"),
         tts="inworld/inworld-tts-1.5-max",
         vad=silero.VAD.load(),
         turn_detection=MultilingualModel(),

@@ -41,6 +41,10 @@ Create a local `.env` file with required credentials:
 - `GOOGLE_API_KEY`
 
 Keep `.env` private and never commit real secrets.
+You can bootstrap from the template:
+```bash
+cp .env.example .env
+```
 
 ## Run Locally
 
@@ -49,7 +53,7 @@ Keep `.env` private and never commit real secrets.
 uv sync
 ```
 
-2. Start the agent:
+2. Set environment variables in `.env` (see `.env.example`), then start the agent:
 ```bash
 uv run python agent.py
 ```
