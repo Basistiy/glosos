@@ -151,7 +151,7 @@ class Assistant(Agent):
 
 server = AgentServer()
 
-@server.rtc_session(agent_name="my-agent")
+@server.rtc_session()
 async def my_agent(ctx: agents.JobContext):
     if not os.getenv("GOOGLE_API_KEY"):
         raise RuntimeError("GOOGLE_API_KEY is required for the Google Gemini LLM.")
