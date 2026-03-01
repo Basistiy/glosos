@@ -2,6 +2,7 @@ import os
 import platform
 import subprocess
 import sys
+import asyncio
 from pathlib import Path
 from typing import Iterable
 
@@ -9,7 +10,7 @@ import tomllib
 from dotenv import load_dotenv
 from google.genai import types as genai_types
 from livekit import agents, rtc
-from livekit.agents import Agent, AgentServer, AgentSession, room_io
+from livekit.agents import Agent, AgentServer, AgentSession, function_tool, room_io
 from livekit.plugins import google, noise_cancellation, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
@@ -24,6 +25,8 @@ REQUIRED_ENV_KEYS = (
     "LIVEKIT_API_SECRET",
     "GOOGLE_API_KEY",
 )
+MAX_TOOL_OUTPUT_CHARS = 4000
+PYTHON_TOOL_TIMEOUT_SECONDS = 10
 
 
 def _read_pyproject(pyproject_path: Path) -> tuple[str, str, str, int]:
@@ -74,7 +77,7 @@ def _build_project_context() -> str:
         git_state = "clean" if not git_output else "dirty"
 
     context_lines = [
-        "Project context:",
+        "Project context for your own source code:",
         f"- root: {root}",
         f"- project: {name} {version}",
         f"- requires-python: {requires_python}",
@@ -105,10 +108,43 @@ class Assistant(Agent):
             instructions="""You are a helpful voice AI assistant.
             You eagerly assist users with their questions by providing information from your extensive knowledge.
             Your responses are concise, to the point, and without any complex formatting or punctuation including emojis, asterisks, or other symbols.
-            You also have the following runtime project context and should use it when relevant:
+            The repository described below is your own source code.
+            Treat this project context as authoritative for how you are implemented and configured.
+            When users ask about your behavior, capabilities, dependencies, setup, or files, ground your answers in this context.
+            You can execute Python in your own project using the execute_python tool when computation or code validation is needed.
+            You also have the following runtime project context:
             """
             + project_context,
         )
+
+    @function_tool
+    async def execute_python(self, code: str) -> str:
+        """Execute Python code in the project environment and return stdout/stderr and exit code."""
+        project_root = Path(__file__).resolve().parent
+
+        def _run() -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=project_root,
+                capture_output=True,
+                text=True,
+                timeout=PYTHON_TOOL_TIMEOUT_SECONDS,
+                check=False,
+            )
+
+        try:
+            result = await asyncio.to_thread(_run)
+        except subprocess.TimeoutExpired:
+            return f"timed out after {PYTHON_TOOL_TIMEOUT_SECONDS}s"
+        except Exception as exc:
+            return f"execution error: {exc.__class__.__name__}: {exc}"
+
+        stdout = (result.stdout or "").strip()
+        stderr = (result.stderr or "").strip()
+        combined = f"exit_code={result.returncode}\nstdout:\n{stdout or '<empty>'}\nstderr:\n{stderr or '<empty>'}"
+        if len(combined) > MAX_TOOL_OUTPUT_CHARS:
+            combined = combined[:MAX_TOOL_OUTPUT_CHARS] + "\n...<truncated>"
+        return combined
 
 server = AgentServer()
 
