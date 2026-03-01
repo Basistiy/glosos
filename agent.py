@@ -12,7 +12,6 @@ from google.genai import types as genai_types
 from livekit import agents, rtc
 from livekit.agents import Agent, AgentServer, AgentSession, function_tool, room_io
 from livekit.plugins import google, noise_cancellation, silero
-from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 load_dotenv(".env")
 
@@ -170,7 +169,8 @@ async def my_agent(ctx: agents.JobContext):
         ),
         tts=TTS_MODEL,
         vad=silero.VAD.load(),
-        turn_detection=MultilingualModel(),
+        turn_detection="vad",
+        max_tool_steps=10,
     )
 
     await session.start(
