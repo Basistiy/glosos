@@ -67,3 +67,22 @@ uv run python agent.py --help
 
 - The project is intentionally small and currently has no tests.
 - Use this repository as a base for extending tools, prompts, and workflow logic in the agent.
+
+## Recovery Automation
+
+If the agent modifies source files and leaves backup copies, you can automate restore:
+
+1. Preview restore actions (safe dry-run):
+```bash
+python scripts/recover_from_backups.py
+```
+
+2. Apply restore:
+```bash
+python scripts/recover_from_backups.py --apply
+```
+
+3. Apply restore and remove backup files:
+```bash
+python scripts/recover_from_backups.py --apply --cleanup-backups
+```
