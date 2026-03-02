@@ -63,19 +63,19 @@ If you need available CLI options from LiveKit Agents:
 uv run python agent.py --help
 ```
 
-## Run In Container (Project Read-Only, `users/` Writable)
+## Run In Container (Project Read-Only, `user/` Writable)
 
 This setup runs the full agent inside Docker while keeping container root filesystem read-only.
-Only `./users` from the host is mounted as writable at `/app/users`.
+Only `./user` from the host is mounted as writable at `/app/user`.
 
 1. Prepare environment:
 ```bash
 cp .env.example .env
 ```
 
-2. Ensure users directory exists:
+2. Ensure user directory exists:
 ```bash
-mkdir -p users
+mkdir -p user
 ```
 
 3. Build and run:
@@ -90,7 +90,7 @@ docker compose down
 
 Notes:
 - Source code edits from inside the agent cannot persist on host because project files are not mounted writable.
-- User data persists in host `users/`.
+- User data persists in host `user/`.
 - Container defaults to `python agent.py start` (not `console`).
 - `console` mode requires PortAudio and host audio device access, which is typically not available in Docker Desktop.
 
@@ -98,22 +98,3 @@ Notes:
 
 - The project is intentionally small and currently has no tests.
 - Use this repository as a base for extending tools, prompts, and workflow logic in the agent.
-
-## Recovery Automation
-
-If the agent modifies source files and leaves backup copies, you can automate restore:
-
-1. Preview restore actions (safe dry-run):
-```bash
-python scripts/recover_from_backups.py
-```
-
-2. Apply restore:
-```bash
-python scripts/recover_from_backups.py --apply
-```
-
-3. Apply restore and remove backup files:
-```bash
-python scripts/recover_from_backups.py --apply --cleanup-backups
-```

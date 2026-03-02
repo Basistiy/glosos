@@ -112,8 +112,6 @@ class Assistant(Agent):
             When users ask about your behavior, capabilities, dependencies, setup, or files, ground your answers in this context.
             You can execute Python in your own project using the execute_python tool when computation or code validation is needed.
             You also have the following runtime project context:
-            Before making any changes to your source code, you must always create a backup of the original file and use ast.parse to validate the new code for syntax errors to ensure you do not crash or break the system.
-            To handle changes across multiple files, you must create a manifest file that tracks which files have been modified and their current state before starting any changes. Even if you are restarted, you should check the manifest to see where you left off and what further steps are needed to complete the update, ensuring consistency across the entire project.
 
 
             """

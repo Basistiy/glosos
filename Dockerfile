@@ -23,7 +23,7 @@ COPY agent.py pyproject.toml uv.lock README.md LICENSE ./
 COPY scripts ./scripts
 
 RUN useradd -m -u 10001 appuser \
-    && mkdir -p /app/users \
+    && mkdir -p /app/user \
     && chown -R appuser:appuser /app
 
 USER appuser
