@@ -380,6 +380,25 @@ wheels = [
 ]
 
 [[package]]
+name = "glosos"
+version = "0.0.1"
+source = { virtual = "." }
+dependencies = [
+    { name = "google-genai" },
+    { name = "livekit-agents", extra = ["google", "silero", "turn-detector"] },
+    { name = "livekit-plugins-noise-cancellation" },
+    { name = "python-dotenv" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "google-genai", specifier = "==1.64.0" },
+    { name = "livekit-agents", extras = ["google", "silero", "turn-detector"], specifier = "~=1.4" },
+    { name = "livekit-plugins-noise-cancellation", specifier = "~=0.2" },
+    { name = "python-dotenv", specifier = ">=1.2.1" },
+]
+
+[[package]]
 name = "google-api-core"
 version = "2.30.0"
 source = { registry = "https://pypi.org/simple" }
@@ -841,25 +860,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/df/6c/f5f7cb226441b3a357c2ea5444899b133dd13a5875894c6a9cd52fc5aa74/livekit_protocol-1.1.2.tar.gz", hash = "sha256:4550bf78fb9d365f19ea9875e565d86a2fb798854c8bd2e9100d7f7640dd9072", size = 79620, upload-time = "2026-01-20T01:27:23.437Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/55/f9/40e81d1b126d79a00b4a8a472a4f7c655b0a7736bb4d08f936be550b3bd8/livekit_protocol-1.1.2-py3-none-any.whl", hash = "sha256:8a26d592a87f5f70fee23aa88e47490727158ee8799c82742585aa8f73b160c5", size = 98854, upload-time = "2026-01-20T01:27:22.139Z" },
-]
-
-[[package]]
-name = "livekit-voice-agent"
-version = "0.1.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "google-genai" },
-    { name = "livekit-agents", extra = ["google", "silero", "turn-detector"] },
-    { name = "livekit-plugins-noise-cancellation" },
-    { name = "python-dotenv" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "google-genai", specifier = "==1.64.0" },
-    { name = "livekit-agents", extras = ["google", "silero", "turn-detector"], specifier = "~=1.4" },
-    { name = "livekit-plugins-noise-cancellation", specifier = "~=0.2" },
-    { name = "python-dotenv", specifier = ">=1.2.1" },
 ]
 
 [[package]]

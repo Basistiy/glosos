@@ -63,6 +63,37 @@ If you need available CLI options from LiveKit Agents:
 uv run python agent.py --help
 ```
 
+## Run In Container (Project Read-Only, `users/` Writable)
+
+This setup runs the full agent inside Docker while keeping container root filesystem read-only.
+Only `./users` from the host is mounted as writable at `/app/users`.
+
+1. Prepare environment:
+```bash
+cp .env.example .env
+```
+
+2. Ensure users directory exists:
+```bash
+mkdir -p users
+```
+
+3. Build and run:
+```bash
+docker compose up --build
+```
+
+4. Stop:
+```bash
+docker compose down
+```
+
+Notes:
+- Source code edits from inside the agent cannot persist on host because project files are not mounted writable.
+- User data persists in host `users/`.
+- Container defaults to `python agent.py start` (not `console`).
+- `console` mode requires PortAudio and host audio device access, which is typically not available in Docker Desktop.
+
 ## Notes
 
 - The project is intentionally small and currently has no tests.
