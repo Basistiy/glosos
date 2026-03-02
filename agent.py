@@ -14,9 +14,13 @@ from livekit.plugins import google, noise_cancellation, silero
 
 load_dotenv(".env")
 
-STT_MODEL = "cartesia/ink-whisper"
+STT_MODEL = "google/chirp"
 LLM_MODEL = "gemini-3-flash-preview"
-TTS_MODEL = "inworld/inworld-tts-1.5-max"
+TTS_MODEL = "chirp_3"
+TTS_VOICE_NAME = "en-US-Chirp3-HD-Charon"
+GOOGLE_STT_LOCATION = (os.getenv("GOOGLE_STT_LOCATION") or "us-central1").strip()
+MIN_ENDPOINTING_DELAY = float((os.getenv("MIN_ENDPOINTING_DELAY") or "0.25").strip())
+MAX_ENDPOINTING_DELAY = float((os.getenv("MAX_ENDPOINTING_DELAY") or "1.2").strip())
 MAX_TOOL_OUTPUT_CHARS = 4000
 PYTHON_TOOL_TIMEOUT_SECONDS = 10
 USER_SYSTEM_INSTRUCTIONS_PATH = Path("user/system/instructions.md")
@@ -88,6 +92,28 @@ def _print_project_inspection() -> None:
         print(f"[startup] {line[2:] if line.startswith('- ') else line}")
 
 
+def _google_stt_credentials_file() -> str:
+    root = Path(__file__).resolve().parent
+    credentials_file = (os.getenv("GOOGLE_STT_CREDENTIALS_FILE") or "").strip()
+    if credentials_file:
+        configured = Path(credentials_file).expanduser()
+        if not configured.is_absolute():
+            configured = root / configured
+        credentials_file = str(configured)
+    else:
+        fallback = (
+            root / ".config" / "keys" / "google-stt-service-account.json"
+        )
+        if fallback.exists():
+            credentials_file = str(fallback)
+    if not credentials_file:
+        raise RuntimeError(
+            "Google STT requires credentials. Set GOOGLE_STT_CREDENTIALS_FILE "
+            "to a service-account JSON key path."
+        )
+    return credentials_file
+
+
 class Assistant(Agent):
     def __init__(self, project_context: str) -> None:
         root = Path(__file__).resolve().parent
@@ -147,12 +173,18 @@ server = AgentServer()
 
 @server.rtc_session()
 async def my_agent(ctx: agents.JobContext):
-    if not os.getenv("GOOGLE_API_KEY"):
+    if not (os.getenv("GOOGLE_API_KEY") or "").strip():
         raise RuntimeError("GOOGLE_API_KEY is required for the Google Gemini LLM.")
 
     project_context = _build_project_context()
+    stt_credentials_file = _google_stt_credentials_file()
     session = AgentSession(
-        stt=STT_MODEL,
+        stt=google.STT(
+            model="chirp_2",
+            location=GOOGLE_STT_LOCATION,
+            spoken_punctuation=False,
+            credentials_file=stt_credentials_file,
+        ),
         llm=google.LLM(
             model=LLM_MODEL,
             temperature=0.8,
@@ -161,9 +193,16 @@ async def my_agent(ctx: agents.JobContext):
                 include_thoughts=True,
             ),
         ),
-        tts=TTS_MODEL,
+        tts=google.TTS(
+            model_name=TTS_MODEL,
+            voice_name=TTS_VOICE_NAME,
+            use_streaming=True,
+            credentials_file=stt_credentials_file,
+        ),
         vad=silero.VAD.load(),
         turn_detection="vad",
+        min_endpointing_delay=MIN_ENDPOINTING_DELAY,
+        max_endpointing_delay=MAX_ENDPOINTING_DELAY,
         max_tool_steps=10,
     )
 
