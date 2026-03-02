@@ -21,6 +21,7 @@ TTS_MODEL = "chirp_3"
 TTS_VOICE_NAME = "en-US-Chirp3-HD-Charon"
 GOOGLE_STT_LOCATION = (os.getenv("GOOGLE_STT_LOCATION") or "eu").strip()
 GOOGLE_LLM_LOCATION = (os.getenv("GOOGLE_LLM_LOCATION") or "global").strip()
+STT_LANGUAGE = (os.getenv("STT_LANGUAGE") or "en-US").strip()
 MIN_ENDPOINTING_DELAY = float((os.getenv("MIN_ENDPOINTING_DELAY") or "0.25").strip())
 MAX_ENDPOINTING_DELAY = float((os.getenv("MAX_ENDPOINTING_DELAY") or "1.2").strip())
 MAX_TOOL_OUTPUT_CHARS = 4000
@@ -196,8 +197,8 @@ async def my_agent(ctx: agents.JobContext):
         stt=google.STT(
             model=STT_MODEL,
             location=GOOGLE_STT_LOCATION,
-            languages=["ru-RU", "en-US"],
-            detect_language=True,
+            languages=STT_LANGUAGE,
+            detect_language=False,
             spoken_punctuation=False,
             credentials_file=stt_credentials_file,
         ),
