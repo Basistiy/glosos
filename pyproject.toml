@@ -1,6 +1,6 @@
 [project]
-name = "livekit-voice-agent"
-version = "0.1.0"
+name = "glosos"
+version = "0.0.1"
 requires-python = ">=3.14"
 dependencies = [
     "livekit-agents[google,silero,turn-detector]~=1.4",

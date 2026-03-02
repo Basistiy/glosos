@@ -15,7 +15,7 @@ from livekit.plugins import google, noise_cancellation, silero
 
 load_dotenv(".env")
 
-STT_MODEL = "assemblyai/universal-streaming"
+STT_MODEL = "cartesia/ink-whisper"
 LLM_MODEL = "gemini-3-flash-preview"
 TTS_MODEL = "inworld/inworld-tts-1.5-max"
 REQUIRED_ENV_KEYS = (
