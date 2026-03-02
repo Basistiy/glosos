@@ -20,7 +20,6 @@ RUN pip install --no-cache-dir \
     "python-dotenv>=1.2.1"
 
 COPY agent.py pyproject.toml uv.lock README.md LICENSE ./
-COPY scripts ./scripts
 
 RUN useradd -m -u 10001 appuser \
     && mkdir -p /app/user \
