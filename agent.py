@@ -3,6 +3,7 @@ import platform
 import subprocess
 import sys
 import asyncio
+import json
 from pathlib import Path
 
 import tomllib
@@ -14,11 +15,12 @@ from livekit.plugins import google, noise_cancellation, silero
 
 load_dotenv(".env")
 
-STT_MODEL = "google/chirp"
+STT_MODEL = (os.getenv("STT_MODEL") or "latest_long").strip()
 LLM_MODEL = "gemini-3-flash-preview"
 TTS_MODEL = "chirp_3"
 TTS_VOICE_NAME = "en-US-Chirp3-HD-Charon"
-GOOGLE_STT_LOCATION = (os.getenv("GOOGLE_STT_LOCATION") or "us-central1").strip()
+GOOGLE_STT_LOCATION = (os.getenv("GOOGLE_STT_LOCATION") or "eu").strip()
+GOOGLE_LLM_LOCATION = (os.getenv("GOOGLE_LLM_LOCATION") or "global").strip()
 MIN_ENDPOINTING_DELAY = float((os.getenv("MIN_ENDPOINTING_DELAY") or "0.25").strip())
 MAX_ENDPOINTING_DELAY = float((os.getenv("MAX_ENDPOINTING_DELAY") or "1.2").strip())
 MAX_TOOL_OUTPUT_CHARS = 4000
@@ -114,6 +116,16 @@ def _google_stt_credentials_file() -> str:
     return credentials_file
 
 
+def _google_cloud_project_from_credentials(credentials_file: str) -> str | None:
+    try:
+        with Path(credentials_file).open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception:
+        return None
+    project_id = payload.get("project_id")
+    return project_id.strip() if isinstance(project_id, str) and project_id.strip() else None
+
+
 class Assistant(Agent):
     def __init__(self, project_context: str) -> None:
         root = Path(__file__).resolve().parent
@@ -173,23 +185,29 @@ server = AgentServer()
 
 @server.rtc_session()
 async def my_agent(ctx: agents.JobContext):
-    if not (os.getenv("GOOGLE_API_KEY") or "").strip():
-        raise RuntimeError("GOOGLE_API_KEY is required for the Google Gemini LLM.")
-
     project_context = _build_project_context()
     stt_credentials_file = _google_stt_credentials_file()
+    os.environ.setdefault("GOOGLE_APPLICATION_CREDENTIALS", stt_credentials_file)
+    if not (os.getenv("GOOGLE_CLOUD_PROJECT") or "").strip():
+        inferred_project = _google_cloud_project_from_credentials(stt_credentials_file)
+        if inferred_project:
+            os.environ["GOOGLE_CLOUD_PROJECT"] = inferred_project
     session = AgentSession(
         stt=google.STT(
-            model="chirp_2",
+            model=STT_MODEL,
             location=GOOGLE_STT_LOCATION,
+            languages=["ru-RU", "en-US"],
+            detect_language=True,
             spoken_punctuation=False,
             credentials_file=stt_credentials_file,
         ),
         llm=google.LLM(
             model=LLM_MODEL,
+            vertexai=True,
+            location=GOOGLE_LLM_LOCATION,
             temperature=0.8,
             thinking_config=genai_types.ThinkingConfig(
-                thinking_level=genai_types.ThinkingLevel.MEDIUM,
+                thinking_level=genai_types.ThinkingLevel.LOW,
                 include_thoughts=True,
             ),
         ),
