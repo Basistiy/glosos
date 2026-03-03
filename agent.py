@@ -9,18 +9,19 @@ from pathlib import Path
 import tomllib
 from dotenv import load_dotenv
 from google.genai import types as genai_types
-from livekit import agents, rtc
-from livekit.agents import Agent, AgentServer, AgentSession, function_tool, room_io
-from livekit.plugins import google, noise_cancellation, silero
+from livekit import agents
+from livekit.agents import Agent, AgentServer, AgentSession, function_tool
+from livekit.plugins import google, silero
 
 load_dotenv(".env")
 
 STT_MODEL = (os.getenv("STT_MODEL") or "latest_long").strip()
-LLM_MODEL = "gemini-3-flash-preview"
+LLM_MODEL = (os.getenv("LLM_MODEL") or "gemini-3-flash-preview").strip()
 TTS_MODEL = "chirp_3"
 TTS_VOICE_NAME = "en-US-Chirp3-HD-Charon"
 GOOGLE_STT_LOCATION = (os.getenv("GOOGLE_STT_LOCATION") or "eu").strip()
 GOOGLE_LLM_LOCATION = (os.getenv("GOOGLE_LLM_LOCATION") or "global").strip()
+GOOGLE_API_KEY = (os.getenv("GOOGLE_API_KEY") or "").strip()
 STT_LANGUAGE = (os.getenv("STT_LANGUAGE") or "en-US").strip()
 MIN_ENDPOINTING_DELAY = float((os.getenv("MIN_ENDPOINTING_DELAY") or "0.25").strip())
 MAX_ENDPOINTING_DELAY = float((os.getenv("MAX_ENDPOINTING_DELAY") or "1.2").strip())
@@ -61,6 +62,7 @@ def _build_project_context() -> str:
         f"- requires-python: {requires_python}",
         f"- dependencies-in-pyproject: {dependency_count}",
         f"- models: stt={STT_MODEL}, llm={LLM_MODEL}, tts={TTS_MODEL}",
+        f"- llm-provider: {'gemini-api-key' if GOOGLE_API_KEY else 'vertex-ai'}",
         f"- key-files-present: {', '.join(existing_files) if existing_files else 'none'}",
         f"- key-files-missing: {', '.join(missing_files) if missing_files else 'none'}",
     ]
@@ -125,6 +127,28 @@ def _google_cloud_project_from_credentials(credentials_file: str) -> str | None:
         return None
     project_id = payload.get("project_id")
     return project_id.strip() if isinstance(project_id, str) and project_id.strip() else None
+
+
+def _build_google_llm() -> google.LLM:
+    thinking_config = genai_types.ThinkingConfig(
+        thinking_level=genai_types.ThinkingLevel.LOW,
+        include_thoughts=False,
+    )
+    if GOOGLE_API_KEY:
+        return google.LLM(
+            model=LLM_MODEL,
+            vertexai=False,
+            api_key=GOOGLE_API_KEY,
+            temperature=0.4,
+            thinking_config=thinking_config,
+        )
+    return google.LLM(
+        model=LLM_MODEL,
+        vertexai=True,
+        location=GOOGLE_LLM_LOCATION,
+        temperature=0.4,
+        thinking_config=thinking_config,
+    )
 
 
 class Assistant(Agent):
@@ -202,16 +226,7 @@ async def my_agent(ctx: agents.JobContext):
             spoken_punctuation=False,
             credentials_file=stt_credentials_file,
         ),
-        llm=google.LLM(
-            model=LLM_MODEL,
-            vertexai=True,
-            location=GOOGLE_LLM_LOCATION,
-            temperature=0.8,
-            thinking_config=genai_types.ThinkingConfig(
-                thinking_level=genai_types.ThinkingLevel.LOW,
-                include_thoughts=True,
-            ),
-        ),
+        llm=_build_google_llm(),
         tts=google.TTS(
             model_name=TTS_MODEL,
             voice_name=TTS_VOICE_NAME,
@@ -228,11 +243,6 @@ async def my_agent(ctx: agents.JobContext):
     await session.start(
         room=ctx.room,
         agent=Assistant(project_context=project_context),
-        room_options=room_io.RoomOptions(
-            audio_input=room_io.AudioInputOptions(
-                noise_cancellation=lambda params: noise_cancellation.BVCTelephony() if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP else noise_cancellation.BVC(),
-            ),
-        ),
     )
 
     await session.generate_reply(
