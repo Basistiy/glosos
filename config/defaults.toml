@@ -1,0 +1,11 @@
+[agent]
+STT_MODEL = "latest_long"
+LLM_MODEL = "gemini-3-flash-preview"
+GOOGLE_STT_LOCATION = "eu"
+GOOGLE_LLM_LOCATION = "global"
+STT_LANGUAGE = "en-US"
+MIN_ENDPOINTING_DELAY = 0.25
+MAX_ENDPOINTING_DELAY = 1.2
+
+# Optional for Vertex AI mode when GOOGLE_API_KEY/GEMINI_API_KEY is not provided.
+GOOGLE_CLOUD_PROJECT = ""

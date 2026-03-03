@@ -14,33 +14,93 @@ from livekit.plugins import google, silero
 
 load_dotenv(".env")
 
-def _require_env(name: str) -> str:
+ROOT = Path(__file__).resolve().parent
+DEFAULTS_PATH = ROOT / "config" / "defaults.toml"
+
+
+def _load_agent_defaults() -> dict[str, object]:
+    try:
+        with DEFAULTS_PATH.open("rb") as f:
+            payload = tomllib.load(f)
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            f"Missing defaults file: {DEFAULTS_PATH}. "
+            "Commit config/defaults.toml with non-secret runtime settings."
+        ) from exc
+    except OSError as exc:
+        raise RuntimeError(f"Failed to read defaults file {DEFAULTS_PATH}: {exc}") from exc
+
+    defaults = payload.get("agent")
+    if not isinstance(defaults, dict):
+        raise RuntimeError(
+            f"Invalid defaults format in {DEFAULTS_PATH}: expected [agent] table."
+        )
+    return defaults
+
+
+AGENT_DEFAULTS = _load_agent_defaults()
+
+
+def _require_secret_env(name: str) -> str:
     value = (os.getenv(name) or "").strip()
     if not value:
         raise RuntimeError(f"Missing required environment variable: {name}")
     return value
 
 
-def _require_float_env(name: str) -> float:
-    raw = _require_env(name)
+def _get_setting(name: str) -> str:
+    env_value = (os.getenv(name) or "").strip()
+    if env_value:
+        return env_value
+
+    default_value = AGENT_DEFAULTS.get(name)
+    if isinstance(default_value, str):
+        value = default_value.strip()
+        if value:
+            return value
+    elif isinstance(default_value, (int, float)):
+        return str(default_value)
+
+    raise RuntimeError(
+        f"Missing runtime setting: {name}. "
+        f"Set env var {name} or [agent].{name} in {DEFAULTS_PATH}."
+    )
+
+
+def _get_optional_setting(name: str) -> str:
+    env_value = (os.getenv(name) or "").strip()
+    if env_value:
+        return env_value
+
+    default_value = AGENT_DEFAULTS.get(name)
+    if isinstance(default_value, str):
+        return default_value.strip()
+    if isinstance(default_value, (int, float)):
+        return str(default_value)
+    return ""
+
+
+def _get_float_setting(name: str) -> float:
+    raw = _get_setting(name)
     try:
         return float(raw)
     except ValueError as exc:
         raise RuntimeError(
-            f"Invalid float for environment variable {name}: {raw!r}"
+            f"Invalid float runtime setting for {name}: {raw!r}"
         ) from exc
 
 
-STT_MODEL = _require_env("STT_MODEL")
-LLM_MODEL = _require_env("LLM_MODEL")
+STT_MODEL = _get_setting("STT_MODEL")
+LLM_MODEL = _get_setting("LLM_MODEL")
 TTS_MODEL = "chirp_3"
 TTS_VOICE_NAME = "en-US-Chirp3-HD-Charon"
-GOOGLE_STT_LOCATION = _require_env("GOOGLE_STT_LOCATION")
-GOOGLE_LLM_LOCATION = _require_env("GOOGLE_LLM_LOCATION")
+GOOGLE_STT_LOCATION = _get_setting("GOOGLE_STT_LOCATION")
+GOOGLE_LLM_LOCATION = _get_setting("GOOGLE_LLM_LOCATION")
 GOOGLE_API_KEY = ((os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or "")).strip()
-STT_LANGUAGE = _require_env("STT_LANGUAGE")
-MIN_ENDPOINTING_DELAY = _require_float_env("MIN_ENDPOINTING_DELAY")
-MAX_ENDPOINTING_DELAY = _require_float_env("MAX_ENDPOINTING_DELAY")
+GOOGLE_CLOUD_PROJECT = _get_optional_setting("GOOGLE_CLOUD_PROJECT")
+STT_LANGUAGE = _get_setting("STT_LANGUAGE")
+MIN_ENDPOINTING_DELAY = _get_float_setting("MIN_ENDPOINTING_DELAY")
+MAX_ENDPOINTING_DELAY = _get_float_setting("MAX_ENDPOINTING_DELAY")
 MAX_TOOL_OUTPUT_CHARS = 4000
 PYTHON_TOOL_TIMEOUT_SECONDS = 10
 USER_SYSTEM_INSTRUCTIONS_PATH = Path("user/system/instructions.md")
@@ -65,15 +125,21 @@ def _read_pyproject(pyproject_path: Path) -> tuple[str, str, str, int]:
 
 
 def _build_project_context() -> str:
-    root = Path(__file__).resolve().parent
-    key_files = ("README.md", "agent.py", "pyproject.toml", "uv.lock", ".env.example")
-    name, version, requires_python, dependency_count = _read_pyproject(root / "pyproject.toml")
-    existing_files = [file_name for file_name in key_files if (root / file_name).exists()]
-    missing_files = [file_name for file_name in key_files if not (root / file_name).exists()]
+    key_files = (
+        "README.md",
+        "agent.py",
+        "pyproject.toml",
+        "uv.lock",
+        ".env.example",
+        "config/defaults.toml",
+    )
+    name, version, requires_python, dependency_count = _read_pyproject(ROOT / "pyproject.toml")
+    existing_files = [file_name for file_name in key_files if (ROOT / file_name).exists()]
+    missing_files = [file_name for file_name in key_files if not (ROOT / file_name).exists()]
 
     context_lines = [
         "Project context for your own source code:",
-        f"- root: {root}",
+        f"- root: {ROOT}",
         f"- project: {name} {version}",
         f"- requires-python: {requires_python}",
         f"- dependencies-in-pyproject: {dependency_count}",
@@ -103,23 +169,21 @@ def _read_user_system_instructions(root: Path) -> str:
 
 
 def _print_project_inspection() -> None:
-    root = Path(__file__).resolve().parent
     project_context = _build_project_context()
 
     print("\n[startup] project inspection")
-    print(f"[startup] root: {root}")
+    print(f"[startup] root: {ROOT}")
     print(f"[startup] python: {sys.version.split()[0]} ({platform.python_implementation()})")
     for line in project_context.splitlines()[1:]:
         print(f"[startup] {line[2:] if line.startswith('- ') else line}")
 
 
 def _google_stt_credentials_file() -> str:
-    root = Path(__file__).resolve().parent
     configured_env = "GOOGLE_STT_CREDENTIALS_FILE"
-    credentials_file = _require_env(configured_env)
+    credentials_file = _require_secret_env(configured_env)
     configured = Path(credentials_file).expanduser()
     if not configured.is_absolute():
-        configured = root / configured
+        configured = ROOT / configured
     path = configured
     if not path.exists():
         raise RuntimeError(
@@ -136,7 +200,7 @@ def _google_stt_credentials_file() -> str:
 
 
 def _build_google_llm() -> google.LLM:
-    if not GOOGLE_API_KEY and not (os.getenv("GOOGLE_CLOUD_PROJECT") or "").strip():
+    if not GOOGLE_API_KEY and not GOOGLE_CLOUD_PROJECT:
         raise RuntimeError(
             "Set GOOGLE_API_KEY (or GEMINI_API_KEY) for Gemini API mode, "
             "or set GOOGLE_CLOUD_PROJECT for Vertex AI mode."
@@ -224,6 +288,8 @@ async def my_agent(ctx: agents.JobContext):
     project_context = _build_project_context()
     stt_credentials_file = _google_stt_credentials_file()
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = stt_credentials_file
+    if GOOGLE_CLOUD_PROJECT and not (os.getenv("GOOGLE_CLOUD_PROJECT") or "").strip():
+        os.environ["GOOGLE_CLOUD_PROJECT"] = GOOGLE_CLOUD_PROJECT
     session = AgentSession(
         stt=google.STT(
             model=STT_MODEL,

@@ -29,27 +29,27 @@ Configured pipeline in `agent.py`:
 ## Repository Layout
 
 - [`agent.py`](agent.py): agent implementation and runtime entrypoint
+- [`config/defaults.toml`](config/defaults.toml): committed non-secret runtime defaults
 - [`pyproject.toml`](pyproject.toml): project metadata and dependencies
 - [`uv.lock`](uv.lock): locked dependency graph
 
-## Environment Variables
+## Configuration
 
-Create a local `.env` file with required credentials:
+This project uses a split configuration model:
+- committed non-secret defaults in `config/defaults.toml`,
+- local secrets in `.env` (gitignored).
+
+Create a local `.env` file with secrets:
 - `LIVEKIT_API_KEY`
 - `LIVEKIT_API_SECRET`
 - `LIVEKIT_URL`
 - `GOOGLE_STT_CREDENTIALS_FILE`
-- `STT_MODEL`
-- `LLM_MODEL`
-- `GOOGLE_STT_LOCATION`
-- `GOOGLE_LLM_LOCATION`
-- `STT_LANGUAGE`
-- `MIN_ENDPOINTING_DELAY`
-- `MAX_ENDPOINTING_DELAY`
 
 For LLM auth, set either:
 - `GOOGLE_API_KEY` (or legacy alias `GEMINI_API_KEY`) for Gemini API key mode, or
-- Vertex AI env (`GOOGLE_CLOUD_PROJECT` and credentials) if not using an API key.
+- Vertex AI mode (`GOOGLE_CLOUD_PROJECT` via env or `config/defaults.toml`) if not using an API key.
+
+Startup fails fast if required secrets/settings are missing or invalid.
 
 Keep `.env` private and never commit real secrets.
 You can bootstrap from the template:
