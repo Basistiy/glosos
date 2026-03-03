@@ -3,7 +3,6 @@ import platform
 import subprocess
 import sys
 import asyncio
-import json
 from pathlib import Path
 
 import tomllib
@@ -15,16 +14,33 @@ from livekit.plugins import google, silero
 
 load_dotenv(".env")
 
-STT_MODEL = (os.getenv("STT_MODEL") or "latest_long").strip()
-LLM_MODEL = (os.getenv("LLM_MODEL") or "gemini-3-flash-preview").strip()
+def _require_env(name: str) -> str:
+    value = (os.getenv(name) or "").strip()
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
+
+def _require_float_env(name: str) -> float:
+    raw = _require_env(name)
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Invalid float for environment variable {name}: {raw!r}"
+        ) from exc
+
+
+STT_MODEL = _require_env("STT_MODEL")
+LLM_MODEL = _require_env("LLM_MODEL")
 TTS_MODEL = "chirp_3"
 TTS_VOICE_NAME = "en-US-Chirp3-HD-Charon"
-GOOGLE_STT_LOCATION = (os.getenv("GOOGLE_STT_LOCATION") or "eu").strip()
-GOOGLE_LLM_LOCATION = (os.getenv("GOOGLE_LLM_LOCATION") or "global").strip()
+GOOGLE_STT_LOCATION = _require_env("GOOGLE_STT_LOCATION")
+GOOGLE_LLM_LOCATION = _require_env("GOOGLE_LLM_LOCATION")
 GOOGLE_API_KEY = ((os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or "")).strip()
-STT_LANGUAGE = (os.getenv("STT_LANGUAGE") or "en-US").strip()
-MIN_ENDPOINTING_DELAY = float((os.getenv("MIN_ENDPOINTING_DELAY") or "0.25").strip())
-MAX_ENDPOINTING_DELAY = float((os.getenv("MAX_ENDPOINTING_DELAY") or "1.2").strip())
+STT_LANGUAGE = _require_env("STT_LANGUAGE")
+MIN_ENDPOINTING_DELAY = _require_float_env("MIN_ENDPOINTING_DELAY")
+MAX_ENDPOINTING_DELAY = _require_float_env("MAX_ENDPOINTING_DELAY")
 MAX_TOOL_OUTPUT_CHARS = 4000
 PYTHON_TOOL_TIMEOUT_SECONDS = 10
 USER_SYSTEM_INSTRUCTIONS_PATH = Path("user/system/instructions.md")
@@ -100,25 +116,11 @@ def _print_project_inspection() -> None:
 def _google_stt_credentials_file() -> str:
     root = Path(__file__).resolve().parent
     configured_env = "GOOGLE_STT_CREDENTIALS_FILE"
-    credentials_file = (os.getenv(configured_env) or "").strip()
-    if credentials_file:
-        configured = Path(credentials_file).expanduser()
-        if not configured.is_absolute():
-            configured = root / configured
-        path = configured
-    else:
-        fallback = (
-            root / ".config" / "keys" / "google-stt-service-account.json"
-        )
-        if fallback.exists():
-            path = fallback
-        else:
-            path = None
-    if path is None:
-        raise RuntimeError(
-            "Google STT requires credentials. Set GOOGLE_STT_CREDENTIALS_FILE "
-            "to a service-account JSON key path."
-        )
+    credentials_file = _require_env(configured_env)
+    configured = Path(credentials_file).expanduser()
+    if not configured.is_absolute():
+        configured = root / configured
+    path = configured
     if not path.exists():
         raise RuntimeError(
             f"Google STT credentials path does not exist: {path}. "
@@ -133,17 +135,12 @@ def _google_stt_credentials_file() -> str:
     return str(path)
 
 
-def _google_cloud_project_from_credentials(credentials_file: str) -> str | None:
-    try:
-        with Path(credentials_file).open("r", encoding="utf-8") as f:
-            payload = json.load(f)
-    except Exception:
-        return None
-    project_id = payload.get("project_id")
-    return project_id.strip() if isinstance(project_id, str) and project_id.strip() else None
-
-
 def _build_google_llm() -> google.LLM:
+    if not GOOGLE_API_KEY and not (os.getenv("GOOGLE_CLOUD_PROJECT") or "").strip():
+        raise RuntimeError(
+            "Set GOOGLE_API_KEY (or GEMINI_API_KEY) for Gemini API mode, "
+            "or set GOOGLE_CLOUD_PROJECT for Vertex AI mode."
+        )
     thinking_config = genai_types.ThinkingConfig(
         thinking_level=genai_types.ThinkingLevel.LOW,
         include_thoughts=False,
@@ -227,10 +224,6 @@ async def my_agent(ctx: agents.JobContext):
     project_context = _build_project_context()
     stt_credentials_file = _google_stt_credentials_file()
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = stt_credentials_file
-    if not (os.getenv("GOOGLE_CLOUD_PROJECT") or "").strip():
-        inferred_project = _google_cloud_project_from_credentials(stt_credentials_file)
-        if inferred_project:
-            os.environ["GOOGLE_CLOUD_PROJECT"] = inferred_project
     session = AgentSession(
         stt=google.STT(
             model=STT_MODEL,

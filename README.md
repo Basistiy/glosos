@@ -39,6 +39,13 @@ Create a local `.env` file with required credentials:
 - `LIVEKIT_API_SECRET`
 - `LIVEKIT_URL`
 - `GOOGLE_STT_CREDENTIALS_FILE`
+- `STT_MODEL`
+- `LLM_MODEL`
+- `GOOGLE_STT_LOCATION`
+- `GOOGLE_LLM_LOCATION`
+- `STT_LANGUAGE`
+- `MIN_ENDPOINTING_DELAY`
+- `MAX_ENDPOINTING_DELAY`
 
 For LLM auth, set either:
 - `GOOGLE_API_KEY` (or legacy alias `GEMINI_API_KEY`) for Gemini API key mode, or
