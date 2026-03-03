@@ -21,7 +21,7 @@ TTS_MODEL = "chirp_3"
 TTS_VOICE_NAME = "en-US-Chirp3-HD-Charon"
 GOOGLE_STT_LOCATION = (os.getenv("GOOGLE_STT_LOCATION") or "eu").strip()
 GOOGLE_LLM_LOCATION = (os.getenv("GOOGLE_LLM_LOCATION") or "global").strip()
-GOOGLE_API_KEY = (os.getenv("GOOGLE_API_KEY") or "").strip()
+GOOGLE_API_KEY = ((os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or "")).strip()
 STT_LANGUAGE = (os.getenv("STT_LANGUAGE") or "en-US").strip()
 MIN_ENDPOINTING_DELAY = float((os.getenv("MIN_ENDPOINTING_DELAY") or "0.25").strip())
 MAX_ENDPOINTING_DELAY = float((os.getenv("MAX_ENDPOINTING_DELAY") or "1.2").strip())
@@ -99,24 +99,38 @@ def _print_project_inspection() -> None:
 
 def _google_stt_credentials_file() -> str:
     root = Path(__file__).resolve().parent
-    credentials_file = (os.getenv("GOOGLE_STT_CREDENTIALS_FILE") or "").strip()
+    configured_env = "GOOGLE_STT_CREDENTIALS_FILE"
+    credentials_file = (os.getenv(configured_env) or "").strip()
     if credentials_file:
         configured = Path(credentials_file).expanduser()
         if not configured.is_absolute():
             configured = root / configured
-        credentials_file = str(configured)
+        path = configured
     else:
         fallback = (
             root / ".config" / "keys" / "google-stt-service-account.json"
         )
         if fallback.exists():
-            credentials_file = str(fallback)
-    if not credentials_file:
+            path = fallback
+        else:
+            path = None
+    if path is None:
         raise RuntimeError(
             "Google STT requires credentials. Set GOOGLE_STT_CREDENTIALS_FILE "
             "to a service-account JSON key path."
         )
-    return credentials_file
+    if not path.exists():
+        raise RuntimeError(
+            f"Google STT credentials path does not exist: {path}. "
+            f"Check {configured_env}."
+        )
+    if path.is_dir():
+        raise RuntimeError(
+            f"Google STT credentials path is a directory, expected a JSON file: {path}. "
+            "If this path is a mounted secret directory, point GOOGLE_STT_CREDENTIALS_FILE "
+            "to the JSON file inside it."
+        )
+    return str(path)
 
 
 def _google_cloud_project_from_credentials(credentials_file: str) -> str | None:
@@ -212,7 +226,7 @@ server = AgentServer()
 async def my_agent(ctx: agents.JobContext):
     project_context = _build_project_context()
     stt_credentials_file = _google_stt_credentials_file()
-    os.environ.setdefault("GOOGLE_APPLICATION_CREDENTIALS", stt_credentials_file)
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = stt_credentials_file
     if not (os.getenv("GOOGLE_CLOUD_PROJECT") or "").strip():
         inferred_project = _google_cloud_project_from_credentials(stt_credentials_file)
         if inferred_project:

@@ -38,7 +38,11 @@ Create a local `.env` file with required credentials:
 - `LIVEKIT_API_KEY`
 - `LIVEKIT_API_SECRET`
 - `LIVEKIT_URL`
-- `GOOGLE_API_KEY`
+- `GOOGLE_STT_CREDENTIALS_FILE`
+
+For LLM auth, set either:
+- `GOOGLE_API_KEY` (or legacy alias `GEMINI_API_KEY`) for Gemini API key mode, or
+- Vertex AI env (`GOOGLE_CLOUD_PROJECT` and credentials) if not using an API key.
 
 Keep `.env` private and never commit real secrets.
 You can bootstrap from the template:
