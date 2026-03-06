@@ -41,13 +41,6 @@ def _load_agent_defaults() -> dict[str, object]:
 AGENT_DEFAULTS = _load_agent_defaults()
 
 
-def _require_secret_env(name: str) -> str:
-    value = (os.getenv(name) or "").strip()
-    if not value:
-        raise RuntimeError(f"Missing required environment variable: {name}")
-    return value
-
-
 def _get_setting(name: str) -> str:
     env_value = (os.getenv(name) or "").strip()
     if env_value:
@@ -90,15 +83,45 @@ def _get_float_setting(name: str) -> float:
         ) from exc
 
 
+def _get_bool_setting(name: str) -> bool:
+    env_value = (os.getenv(name) or "").strip()
+    if env_value:
+        normalized = env_value.lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+        raise RuntimeError(
+            f"Invalid boolean runtime setting for {name}: {env_value!r}."
+        )
+
+    default_value = AGENT_DEFAULTS.get(name)
+    if isinstance(default_value, bool):
+        return default_value
+    if isinstance(default_value, str):
+        normalized = default_value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+        if normalized:
+            raise RuntimeError(
+                f"Invalid boolean default setting for {name}: {default_value!r} in {DEFAULTS_PATH}."
+            )
+    if isinstance(default_value, (int, float)):
+        return bool(default_value)
+    return False
+
+
 STT_MODEL = _get_setting("STT_MODEL")
 LLM_MODEL = _get_setting("LLM_MODEL")
-TTS_MODEL = "chirp_3"
-TTS_VOICE_NAME = "en-US-Chirp3-HD-Charon"
+TTS_MODEL = _get_setting("TTS_MODEL")
+TTS_VOICE_NAME = _get_setting("TTS_VOICE_NAME")
 GOOGLE_STT_LOCATION = _get_setting("GOOGLE_STT_LOCATION")
-GOOGLE_LLM_LOCATION = _get_setting("GOOGLE_LLM_LOCATION")
-GOOGLE_API_KEY = ((os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or "")).strip()
 GOOGLE_CLOUD_PROJECT = _get_optional_setting("GOOGLE_CLOUD_PROJECT")
+GOOGLE_LLM_LOCATION = _get_optional_setting("GOOGLE_LLM_LOCATION") or "us-central1"
 STT_LANGUAGE = _get_setting("STT_LANGUAGE")
+STT_USE_STREAMING = _get_bool_setting("STT_USE_STREAMING")
 MIN_ENDPOINTING_DELAY = _get_float_setting("MIN_ENDPOINTING_DELAY")
 MAX_ENDPOINTING_DELAY = _get_float_setting("MAX_ENDPOINTING_DELAY")
 MAX_TOOL_OUTPUT_CHARS = 4000
@@ -144,7 +167,8 @@ def _build_project_context() -> str:
         f"- requires-python: {requires_python}",
         f"- dependencies-in-pyproject: {dependency_count}",
         f"- models: stt={STT_MODEL}, llm={LLM_MODEL}, tts={TTS_MODEL}",
-        f"- llm-provider: {'gemini-api-key' if GOOGLE_API_KEY else 'vertex-ai'}",
+        f"- stt-streaming: {STT_USE_STREAMING}",
+        "- llm-provider: vertex-ai-service-account",
         f"- key-files-present: {', '.join(existing_files) if existing_files else 'none'}",
         f"- key-files-missing: {', '.join(missing_files) if missing_files else 'none'}",
     ]
@@ -178,51 +202,61 @@ def _print_project_inspection() -> None:
         print(f"[startup] {line[2:] if line.startswith('- ') else line}")
 
 
-def _google_stt_credentials_file() -> str:
-    configured_env = "GOOGLE_STT_CREDENTIALS_FILE"
-    credentials_file = _require_secret_env(configured_env)
+def _google_credentials_file() -> str:
+    configured_env = "GOOGLE_CREDENTIALS_FILE"
+    legacy_env = "GOOGLE_STT_CREDENTIALS_FILE"
+    credentials_file = (
+        (os.getenv(configured_env) or "").strip()
+        or (os.getenv(legacy_env) or "").strip()
+    )
+    if not credentials_file:
+        raise RuntimeError(
+            "Missing required environment variable: GOOGLE_CREDENTIALS_FILE "
+            "(or legacy GOOGLE_STT_CREDENTIALS_FILE)."
+        )
     configured = Path(credentials_file).expanduser()
     if not configured.is_absolute():
         configured = ROOT / configured
     path = configured
     if not path.exists():
         raise RuntimeError(
-            f"Google STT credentials path does not exist: {path}. "
+            f"Google credentials path does not exist: {path}. "
             f"Check {configured_env}."
         )
     if path.is_dir():
         raise RuntimeError(
-            f"Google STT credentials path is a directory, expected a JSON file: {path}. "
-            "If this path is a mounted secret directory, point GOOGLE_STT_CREDENTIALS_FILE "
+            f"Google credentials path is a directory, expected a JSON file: {path}. "
+            "If this path is a mounted secret directory, point GOOGLE_CREDENTIALS_FILE "
             "to the JSON file inside it."
         )
     return str(path)
 
 
 def _build_google_llm() -> google.LLM:
-    if not GOOGLE_API_KEY and not GOOGLE_CLOUD_PROJECT:
+    resolved_llm_model = {
+        "gemini-3-flash": "gemini-3-flash-preview",
+    }.get(LLM_MODEL, LLM_MODEL)
+    if resolved_llm_model == "gemini-3-flash-preview" and GOOGLE_LLM_LOCATION != "global":
         raise RuntimeError(
-            "Set GOOGLE_API_KEY (or GEMINI_API_KEY) for Gemini API mode, "
-            "or set GOOGLE_CLOUD_PROJECT for Vertex AI mode."
+            "Gemini 3 Flash on Vertex AI currently requires GOOGLE_LLM_LOCATION=global."
         )
+
     thinking_config = genai_types.ThinkingConfig(
         thinking_level=genai_types.ThinkingLevel.LOW,
         include_thoughts=False,
     )
-    if GOOGLE_API_KEY:
-        return google.LLM(
-            model=LLM_MODEL,
-            vertexai=False,
-            api_key=GOOGLE_API_KEY,
-            temperature=0.4,
-            thinking_config=thinking_config,
-        )
+    llm_kwargs = {
+        "model": resolved_llm_model,
+        "vertexai": True,
+        "location": GOOGLE_LLM_LOCATION,
+        "temperature": 0.4,
+        "thinking_config": thinking_config,
+    }
+    if GOOGLE_CLOUD_PROJECT:
+        llm_kwargs["project"] = GOOGLE_CLOUD_PROJECT
+
     return google.LLM(
-        model=LLM_MODEL,
-        vertexai=True,
-        location=GOOGLE_LLM_LOCATION,
-        temperature=0.4,
-        thinking_config=thinking_config,
+        **llm_kwargs,
     )
 
 
@@ -286,10 +320,8 @@ server = AgentServer()
 @server.rtc_session()
 async def my_agent(ctx: agents.JobContext):
     project_context = _build_project_context()
-    stt_credentials_file = _google_stt_credentials_file()
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = stt_credentials_file
-    if GOOGLE_CLOUD_PROJECT and not (os.getenv("GOOGLE_CLOUD_PROJECT") or "").strip():
-        os.environ["GOOGLE_CLOUD_PROJECT"] = GOOGLE_CLOUD_PROJECT
+    google_credentials_file = _google_credentials_file()
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = google_credentials_file
     session = AgentSession(
         stt=google.STT(
             model=STT_MODEL,
@@ -297,14 +329,15 @@ async def my_agent(ctx: agents.JobContext):
             languages=STT_LANGUAGE,
             detect_language=False,
             spoken_punctuation=False,
-            credentials_file=stt_credentials_file,
+            use_streaming=STT_USE_STREAMING,
+            credentials_file=google_credentials_file,
         ),
         llm=_build_google_llm(),
         tts=google.TTS(
             model_name=TTS_MODEL,
             voice_name=TTS_VOICE_NAME,
             use_streaming=True,
-            credentials_file=stt_credentials_file,
+            credentials_file=google_credentials_file,
         ),
         vad=silero.VAD.load(),
         turn_detection="vad",

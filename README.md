@@ -21,7 +21,7 @@ The agent is defined in [`agent.py`](agent.py) and registered as `my-agent`.
 
 Configured pipeline in `agent.py`:
 - STT: `assemblyai/universal-streaming`
-- LLM: `gemini-3.1-pro-preview`
+- LLM: `gemini-3-flash` (resolved to Vertex model id `gemini-3-flash-preview`)
 - TTS: `inworld/inworld-tts-1.5-max`
 - VAD: Silero
 - Turn detection: multilingual model
@@ -39,15 +39,19 @@ This project uses a split configuration model:
 - committed non-secret defaults in `config/defaults.toml`,
 - local secrets in `.env` (gitignored).
 
+Runtime settings such as `STT_MODEL`, `LLM_MODEL`, `TTS_MODEL`, `TTS_VOICE_NAME`,
+`STT_LANGUAGE`, `STT_USE_STREAMING`, endpointing delays, and `GOOGLE_LLM_LOCATION` are read from
+`config/defaults.toml` and can be overridden via environment variables.
+For Gemini 3 Flash on Vertex AI, use `GOOGLE_LLM_LOCATION=global`.
+
 Create a local `.env` file with secrets:
 - `LIVEKIT_API_KEY`
 - `LIVEKIT_API_SECRET`
 - `LIVEKIT_URL`
-- `GOOGLE_STT_CREDENTIALS_FILE`
+- `GOOGLE_CREDENTIALS_FILE` (or legacy alias `GOOGLE_STT_CREDENTIALS_FILE`)
 
-For LLM auth, set either:
-- `GOOGLE_API_KEY` (or legacy alias `GEMINI_API_KEY`) for Gemini API key mode, or
-- Vertex AI mode (`GOOGLE_CLOUD_PROJECT` via env or `config/defaults.toml`) if not using an API key.
+For Vertex AI LLM, optional:
+- `GOOGLE_CLOUD_PROJECT` (if omitted, inferred from the service account)
 
 Startup fails fast if required secrets/settings are missing or invalid.
 

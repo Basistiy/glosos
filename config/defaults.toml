@@ -1,11 +1,11 @@
 [agent]
-STT_MODEL = "latest_long"
-LLM_MODEL = "gemini-3-flash-preview"
+STT_MODEL = "latest_short"
+LLM_MODEL = "gemini-3-flash"
+TTS_MODEL = "chirp_3"
+TTS_VOICE_NAME = "en-US-Chirp3-HD-Charon"
 GOOGLE_STT_LOCATION = "eu"
 GOOGLE_LLM_LOCATION = "global"
 STT_LANGUAGE = "en-US"
-MIN_ENDPOINTING_DELAY = 0.25
-MAX_ENDPOINTING_DELAY = 1.2
-
-# Optional for Vertex AI mode when GOOGLE_API_KEY/GEMINI_API_KEY is not provided.
-GOOGLE_CLOUD_PROJECT = ""
+STT_USE_STREAMING = false
+MIN_ENDPOINTING_DELAY = 0.1
+MAX_ENDPOINTING_DELAY = 0.6
