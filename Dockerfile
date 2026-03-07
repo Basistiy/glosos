@@ -19,7 +19,8 @@ RUN pip install --no-cache-dir \
     "google-genai==1.64.0" \
     "python-dotenv>=1.2.1"
 
-COPY agent.py pyproject.toml uv.lock README.md LICENSE ./
+COPY agent.py secret_agent.py pyproject.toml uv.lock README.md LICENSE ./
+COPY config ./config
 
 RUN useradd -m -u 10001 appuser \
     && mkdir -p /app/user \
@@ -27,4 +28,4 @@ RUN useradd -m -u 10001 appuser \
 
 USER appuser
 
-CMD ["python", "agent.py"]
+CMD ["python", "secret_agent.py", "start"]
