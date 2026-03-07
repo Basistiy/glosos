@@ -42,18 +42,14 @@ This project uses a split configuration model:
 
 Runtime settings such as `STT_MODEL`, `LLM_MODEL`, `TTS_MODEL`, `TTS_VOICE_NAME`,
 `STT_LANGUAGE`, `STT_USE_STREAMING`, endpointing delays, and `GOOGLE_LLM_LOCATION` are read from
-`config/defaults.toml` and can be overridden via environment variables.
-For Gemini 3 Flash on Vertex AI, use `GOOGLE_LLM_LOCATION=global`.
+`config/defaults.toml` (no env overrides for settings).
+`LIVEKIT_URL` and `GOOGLE_CREDENTIALS_FILE` are also read only from `config/defaults.toml`.
+`GOOGLE_LLM_LOCATION` is required.
+For Gemini 3 Flash on Vertex AI, set `GOOGLE_LLM_LOCATION=global`.
 
 Create a local `.env` file with secrets:
 - `LIVEKIT_API_KEY`
 - `LIVEKIT_API_SECRET`
-- optional fallback: `LIVEKIT_TOKEN` (used only when `LIVEKIT_API_SECRET` is unset; must be the project secret, not a JWT)
-- `LIVEKIT_URL`
-- `GOOGLE_CREDENTIALS_FILE` (or legacy alias `GOOGLE_STT_CREDENTIALS_FILE`)
-
-For Vertex AI LLM, optional:
-- `GOOGLE_CLOUD_PROJECT` (if omitted, inferred from the service account)
 
 Startup fails fast if required secrets/settings are missing or invalid.
 
@@ -70,7 +66,7 @@ cp .env.example .env
 uv sync
 ```
 
-2. Set environment variables in `.env` (see `.env.example`), then start the agent:
+2. Set secret environment variables in `.env` (see `.env.example`), then start the agent:
 ```bash
 uv run python secret_agent.py
 ```
@@ -79,13 +75,13 @@ Token-only participant mode (no worker dispatch):
 ```bash
 uv run python token_agent.py
 ```
-Requires `LIVEKIT_URL` and a valid room `LIVEKIT_TOKEN`.
+Requires a valid `LIVEKIT_URL` in `config/defaults.toml` and `LIVEKIT_TOKEN`.
 
 Token-only participant mode with auto-generated JWT from API key/secret:
 ```bash
 uv run python run_token_agent.py
 ```
-Requires `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET`.
+Requires `LIVEKIT_URL` in `config/defaults.toml`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET`.
 Optional token-generation env vars:
 - `LIVEKIT_ROOM` (default: `default-room`)
 - `LIVEKIT_IDENTITY` (default: `token-agent`)

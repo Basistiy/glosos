@@ -6,6 +6,7 @@ from livekit import rtc
 
 from agent import (
     Assistant,
+    LIVEKIT_URL,
     _build_project_context,
     _print_project_inspection,
     build_agent_session,
@@ -22,7 +23,6 @@ def _required_env(name: str) -> str:
 
 
 async def run_token_agent() -> None:
-    livekit_url = _required_env("LIVEKIT_URL")
     livekit_token = _required_env("LIVEKIT_TOKEN")
 
     project_context = _build_project_context()
@@ -37,7 +37,7 @@ async def run_token_agent() -> None:
 
     session = build_agent_session()
 
-    await room.connect(livekit_url, livekit_token)
+    await room.connect(LIVEKIT_URL, livekit_token)
     print(f"[token-agent] connected to room: {room.name}")
 
     await session.start(

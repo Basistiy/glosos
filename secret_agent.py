@@ -1,31 +1,30 @@
 import os
 
+from dotenv import load_dotenv
 from livekit import agents
 from livekit.agents import AgentServer
 
-from agent import Assistant, _build_project_context, _print_project_inspection, build_agent_session
+from agent import (
+    Assistant,
+    LIVEKIT_URL,
+    _build_project_context,
+    _print_project_inspection,
+    build_agent_session,
+)
+
+load_dotenv(".env")
 
 
 def _configure_livekit_auth() -> None:
     livekit_secret = (os.getenv("LIVEKIT_API_SECRET") or "").strip()
-    if livekit_secret:
-        return
-
-    livekit_token = (os.getenv("LIVEKIT_TOKEN") or "").strip()
-    if not livekit_token:
-        return
-
-    # JWT access tokens cannot replace LIVEKIT_API_SECRET for agent worker auth.
-    if livekit_token.count(".") == 2:
+    if not livekit_secret:
         raise RuntimeError(
-            "LIVEKIT_API_SECRET is missing and LIVEKIT_TOKEN looks like a JWT. "
-            "The agent worker requires LIVEKIT_API_SECRET (project secret), not a room token."
+            "Missing required secret: LIVEKIT_API_SECRET. "
+            "Worker mode requires project API credentials."
         )
 
-    os.environ["LIVEKIT_API_SECRET"] = livekit_token
 
-
-server = AgentServer()
+server = AgentServer(ws_url=LIVEKIT_URL)
 
 
 @server.rtc_session()

@@ -4,6 +4,7 @@ from datetime import timedelta
 from dotenv import load_dotenv
 from livekit import api
 
+from agent import LIVEKIT_URL
 import token_agent
 
 load_dotenv(".env")
@@ -56,7 +57,6 @@ def _build_livekit_token(identity_env: str, default_identity: str) -> tuple[str,
 
 
 def main() -> None:
-    livekit_url = _required_env("LIVEKIT_URL")
     agent_token, room, agent_identity, ttl_seconds = _build_livekit_token(
         "LIVEKIT_IDENTITY", "token-agent"
     )
@@ -69,7 +69,7 @@ def main() -> None:
         f"[run-token-agent] generated agent token for room={room!r} "
         f"ttl={ttl_seconds}s identity={agent_identity!r}"
     )
-    print(f"[run-token-agent] livekit url: {livekit_url}")
+    print(f"[run-token-agent] livekit url: {LIVEKIT_URL}")
     print(
         f"[run-token-agent] client join token for room={room!r} "
         f"identity={client_identity!r}:"
