@@ -1,6 +1,6 @@
 [agent]
 LIVEKIT_URL = "wss://glosos-uti53aki.livekit.cloud"
-GOOGLE_CREDENTIALS_FILE = "google-service-account.json"
+GOOGLE_CREDENTIALS_FILE = "config/google-service-account.json"
 STT_MODEL = "latest_long"
 LLM_MODEL = "gemini-3-flash"
 TTS_MODEL = "chirp_3"

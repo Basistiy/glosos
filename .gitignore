@@ -133,7 +133,8 @@ celerybeat.pid
 !.env.example
 /.config/keys/
 /google-stt-service-account.json
-/google-service-account.json
+config/.env
+config/google-service-account.json
 user/
 .venv
 env/

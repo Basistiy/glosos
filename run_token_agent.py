@@ -7,7 +7,7 @@ from livekit import api
 from agent import LIVEKIT_URL
 import token_agent
 
-load_dotenv(".env")
+load_dotenv("config/.env")
 
 
 def _required_env(name: str) -> str:

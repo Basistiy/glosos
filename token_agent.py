@@ -12,7 +12,7 @@ from agent import (
     build_agent_session,
 )
 
-load_dotenv(".env")
+load_dotenv("config/.env")
 
 
 def _required_env(name: str) -> str:

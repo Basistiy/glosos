@@ -38,7 +38,7 @@ Configured pipeline in `agent.py`:
 
 This project uses a split configuration model:
 - committed non-secret defaults in `config/defaults.toml`,
-- local secrets in `.env` (gitignored).
+- local secrets in `config/.env` and `config/google-service-account.json` (gitignored).
 
 Runtime settings such as `STT_MODEL`, `LLM_MODEL`, `TTS_MODEL`, `TTS_VOICE_NAME`,
 `STT_LANGUAGE`, `STT_USE_STREAMING`, endpointing delays, and `GOOGLE_LLM_LOCATION` are read from
@@ -47,16 +47,19 @@ Runtime settings such as `STT_MODEL`, `LLM_MODEL`, `TTS_MODEL`, `TTS_VOICE_NAME`
 `GOOGLE_LLM_LOCATION` is required.
 For Gemini 3 Flash on Vertex AI, set `GOOGLE_LLM_LOCATION=global`.
 
-Create a local `.env` file with secrets:
+Create a local `config/.env` file with secrets:
 - `LIVEKIT_API_KEY`
 - `LIVEKIT_API_SECRET`
 
+Place your Google service account JSON at `config/google-service-account.json`.
+
 Startup fails fast if required secrets/settings are missing or invalid.
 
-Keep `.env` private and never commit real secrets.
+Keep `config/.env` and `config/google-service-account.json` private and never commit real secrets.
+The app reads secrets only from `config/`.
 You can bootstrap from the template:
 ```bash
-cp .env.example .env
+cp .env.example config/.env
 ```
 
 ## Run Locally
@@ -66,7 +69,7 @@ cp .env.example .env
 uv sync
 ```
 
-2. Set secret environment variables in `.env` (see `.env.example`), then start the agent:
+2. Set secret environment variables in `config/.env` (see `.env.example`), then start the agent:
 ```bash
 uv run python secret_agent.py
 ```
@@ -93,33 +96,43 @@ If you need available CLI options from LiveKit Agents:
 uv run python secret_agent.py --help
 ```
 
-## Run In Container (Project Read-Only, `user/` Writable)
+## Run In Container (Project Read-Only, `user/` Writable, `config/` Mounted Read-Only)
 
 This setup runs the full agent inside Docker while keeping container root filesystem read-only.
+The host `./config` directory is mounted read-only at `/app/config`, so changes to
+`config/defaults.toml` are picked up on container restart without rebuilding the image.
 Only `./user` from the host is mounted as writable at `/app/user`.
 
 1. Prepare environment:
 ```bash
-cp .env.example .env
+cp .env.example config/.env
 ```
 
-2. Ensure user directory exists:
+2. Place your Google service account file at `config/google-service-account.json`.
+
+3. Ensure user directory exists:
 ```bash
 mkdir -p user
 ```
 
-3. Build and run:
+4. Build and run:
 ```bash
 docker compose up --build
 ```
 
-4. Stop:
+5. After changing files under `config/`, restart the container without rebuilding:
+```bash
+docker compose restart
+```
+
+6. Stop:
 ```bash
 docker compose down
 ```
 
 Notes:
 - Source code edits from inside the agent cannot persist on host because project files are not mounted writable.
+- Runtime config edits in `config/` persist on host and are loaded on the next container start.
 - User data persists in host `user/`.
 - Container defaults to `python secret_agent.py start` (not `console`).
 - `console` mode requires PortAudio and host audio device access, which is typically not available in Docker Desktop.
