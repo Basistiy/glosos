@@ -3,23 +3,12 @@ import os
 
 from dotenv import load_dotenv
 from livekit import rtc
-from livekit.agents import AgentSession
-from livekit.plugins import google, silero
 
 from agent import (
     Assistant,
-    GOOGLE_STT_LOCATION,
-    MAX_ENDPOINTING_DELAY,
-    MIN_ENDPOINTING_DELAY,
-    STT_LANGUAGE,
-    STT_MODEL,
-    STT_USE_STREAMING,
-    TTS_MODEL,
-    TTS_VOICE_NAME,
-    _build_google_llm,
     _build_project_context,
-    _google_credentials_file,
     _print_project_inspection,
+    build_agent_session,
 )
 
 load_dotenv(".env")
@@ -37,8 +26,6 @@ async def run_token_agent() -> None:
     livekit_token = _required_env("LIVEKIT_TOKEN")
 
     project_context = _build_project_context()
-    google_credentials_file = _google_credentials_file()
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = google_credentials_file
 
     room = rtc.Room()
     disconnected = asyncio.Event()
@@ -48,29 +35,7 @@ async def run_token_agent() -> None:
         print(f"[token-agent] disconnected: {reason}")
         disconnected.set()
 
-    session = AgentSession(
-        stt=google.STT(
-            model=STT_MODEL,
-            location=GOOGLE_STT_LOCATION,
-            languages=STT_LANGUAGE,
-            detect_language=False,
-            spoken_punctuation=False,
-            use_streaming=STT_USE_STREAMING,
-            credentials_file=google_credentials_file,
-        ),
-        llm=_build_google_llm(),
-        tts=google.TTS(
-            model_name=TTS_MODEL,
-            voice_name=TTS_VOICE_NAME,
-            use_streaming=True,
-            credentials_file=google_credentials_file,
-        ),
-        vad=silero.VAD.load(),
-        turn_detection="vad",
-        min_endpointing_delay=MIN_ENDPOINTING_DELAY,
-        max_endpointing_delay=MAX_ENDPOINTING_DELAY,
-        max_tool_steps=10,
-    )
+    session = build_agent_session()
 
     await room.connect(livekit_url, livekit_token)
     print(f"[token-agent] connected to room: {room.name}")

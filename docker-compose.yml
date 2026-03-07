@@ -18,4 +18,4 @@ services:
     cap_drop:
       - ALL
     restart: unless-stopped
-    command: ["python", "agent.py", "start"]
+    command: ["python", "secret_agent.py", "start"]

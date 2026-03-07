@@ -10,7 +10,7 @@ This project runs a realtime voice agent that:
 - generates responses with an LLM,
 - speaks replies back with TTS.
 
-The agent is defined in [`agent.py`](agent.py) and registered as `my-agent`.
+Shared agent logic is in [`agent.py`](agent.py), and worker startup/registration is in [`secret_agent.py`](secret_agent.py) as `my-agent`.
 
 ## Tech Stack
 
@@ -28,7 +28,8 @@ Configured pipeline in `agent.py`:
 
 ## Repository Layout
 
-- [`agent.py`](agent.py): agent implementation and runtime entrypoint
+- [`agent.py`](agent.py): shared agent implementation and runtime helpers
+- [`secret_agent.py`](secret_agent.py): LiveKit worker startup (API key/secret mode)
 - [`config/defaults.toml`](config/defaults.toml): committed non-secret runtime defaults
 - [`pyproject.toml`](pyproject.toml): project metadata and dependencies
 - [`uv.lock`](uv.lock): locked dependency graph
@@ -71,7 +72,7 @@ uv sync
 
 2. Set environment variables in `.env` (see `.env.example`), then start the agent:
 ```bash
-uv run python agent.py
+uv run python secret_agent.py
 ```
 
 Token-only participant mode (no worker dispatch):
@@ -93,7 +94,7 @@ Optional token-generation env vars:
 
 If you need available CLI options from LiveKit Agents:
 ```bash
-uv run python agent.py --help
+uv run python secret_agent.py --help
 ```
 
 ## Run In Container (Project Read-Only, `user/` Writable)
@@ -124,7 +125,7 @@ docker compose down
 Notes:
 - Source code edits from inside the agent cannot persist on host because project files are not mounted writable.
 - User data persists in host `user/`.
-- Container defaults to `python agent.py start` (not `console`).
+- Container defaults to `python secret_agent.py start` (not `console`).
 - `console` mode requires PortAudio and host audio device access, which is typically not available in Docker Desktop.
 
 ## Notes

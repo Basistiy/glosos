@@ -8,33 +8,13 @@ from pathlib import Path
 import tomllib
 from dotenv import load_dotenv
 from google.genai import types as genai_types
-from livekit import agents
-from livekit.agents import Agent, AgentServer, AgentSession, function_tool
+from livekit.agents import Agent, AgentSession, function_tool
 from livekit.plugins import google, silero
 
 load_dotenv(".env")
 
 ROOT = Path(__file__).resolve().parent
 DEFAULTS_PATH = ROOT / "config" / "defaults.toml"
-
-
-def _configure_livekit_auth() -> None:
-    livekit_secret = (os.getenv("LIVEKIT_API_SECRET") or "").strip()
-    if livekit_secret:
-        return
-
-    livekit_token = (os.getenv("LIVEKIT_TOKEN") or "").strip()
-    if not livekit_token:
-        return
-
-    # JWT access tokens cannot replace LIVEKIT_API_SECRET for agent worker auth.
-    if livekit_token.count(".") == 2:
-        raise RuntimeError(
-            "LIVEKIT_API_SECRET is missing and LIVEKIT_TOKEN looks like a JWT. "
-            "The agent worker requires LIVEKIT_API_SECRET (project secret), not a room token."
-        )
-
-    os.environ["LIVEKIT_API_SECRET"] = livekit_token
 
 
 def _load_agent_defaults() -> dict[str, object]:
@@ -279,6 +259,34 @@ def _build_google_llm() -> google.LLM:
     )
 
 
+def build_agent_session() -> AgentSession:
+    google_credentials_file = _google_credentials_file()
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = google_credentials_file
+    return AgentSession(
+        stt=google.STT(
+            model=STT_MODEL,
+            location=GOOGLE_STT_LOCATION,
+            languages=STT_LANGUAGE,
+            detect_language=False,
+            spoken_punctuation=False,
+            use_streaming=STT_USE_STREAMING,
+            credentials_file=google_credentials_file,
+        ),
+        llm=_build_google_llm(),
+        tts=google.TTS(
+            model_name=TTS_MODEL,
+            voice_name=TTS_VOICE_NAME,
+            use_streaming=True,
+            credentials_file=google_credentials_file,
+        ),
+        vad=silero.VAD.load(),
+        turn_detection="vad",
+        min_endpointing_delay=MIN_ENDPOINTING_DELAY,
+        max_endpointing_delay=MAX_ENDPOINTING_DELAY,
+        max_tool_steps=10,
+    )
+
+
 class Assistant(Agent):
     def __init__(self, project_context: str) -> None:
         root = Path(__file__).resolve().parent
@@ -333,51 +341,3 @@ class Assistant(Agent):
         if len(combined) > MAX_TOOL_OUTPUT_CHARS:
             combined = combined[:MAX_TOOL_OUTPUT_CHARS] + "\n...<truncated>"
         return combined
-
-server = AgentServer()
-
-@server.rtc_session()
-async def my_agent(ctx: agents.JobContext):
-    project_context = _build_project_context()
-    google_credentials_file = _google_credentials_file()
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = google_credentials_file
-    session = AgentSession(
-        stt=google.STT(
-            model=STT_MODEL,
-            location=GOOGLE_STT_LOCATION,
-            languages=STT_LANGUAGE,
-            detect_language=False,
-            spoken_punctuation=False,
-            use_streaming=STT_USE_STREAMING,
-            credentials_file=google_credentials_file,
-        ),
-        llm=_build_google_llm(),
-        tts=google.TTS(
-            model_name=TTS_MODEL,
-            voice_name=TTS_VOICE_NAME,
-            use_streaming=True,
-            credentials_file=google_credentials_file,
-        ),
-        vad=silero.VAD.load(),
-        turn_detection="vad",
-        min_endpointing_delay=MIN_ENDPOINTING_DELAY,
-        max_endpointing_delay=MAX_ENDPOINTING_DELAY,
-        max_tool_steps=10,
-    )
-
-    await session.start(
-        room=ctx.room,
-        agent=Assistant(project_context=project_context),
-    )
-
-    await session.generate_reply(
-        instructions="Greet the user and offer your assistance."
-    )
-
-
-if __name__ == "__main__":
-    _configure_livekit_auth()
-    _print_project_inspection()
-    agents.cli.run_app(server)
-
-# trigger restart test
