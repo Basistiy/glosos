@@ -47,6 +47,7 @@ For Gemini 3 Flash on Vertex AI, use `GOOGLE_LLM_LOCATION=global`.
 Create a local `.env` file with secrets:
 - `LIVEKIT_API_KEY`
 - `LIVEKIT_API_SECRET`
+- optional fallback: `LIVEKIT_TOKEN` (used only when `LIVEKIT_API_SECRET` is unset; must be the project secret, not a JWT)
 - `LIVEKIT_URL`
 - `GOOGLE_CREDENTIALS_FILE` (or legacy alias `GOOGLE_STT_CREDENTIALS_FILE`)
 
@@ -72,6 +73,23 @@ uv sync
 ```bash
 uv run python agent.py
 ```
+
+Token-only participant mode (no worker dispatch):
+```bash
+uv run python token_agent.py
+```
+Requires `LIVEKIT_URL` and a valid room `LIVEKIT_TOKEN`.
+
+Token-only participant mode with auto-generated JWT from API key/secret:
+```bash
+uv run python run_token_agent.py
+```
+Requires `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET`.
+Optional token-generation env vars:
+- `LIVEKIT_ROOM` (default: `default-room`)
+- `LIVEKIT_IDENTITY` (default: `token-agent`)
+- `LIVEKIT_CLIENT_IDENTITY` (default: `human-test`)
+- `LIVEKIT_TOKEN_TTL_SECONDS` (default: `3600`)
 
 If you need available CLI options from LiveKit Agents:
 ```bash

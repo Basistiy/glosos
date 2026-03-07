@@ -18,6 +18,25 @@ ROOT = Path(__file__).resolve().parent
 DEFAULTS_PATH = ROOT / "config" / "defaults.toml"
 
 
+def _configure_livekit_auth() -> None:
+    livekit_secret = (os.getenv("LIVEKIT_API_SECRET") or "").strip()
+    if livekit_secret:
+        return
+
+    livekit_token = (os.getenv("LIVEKIT_TOKEN") or "").strip()
+    if not livekit_token:
+        return
+
+    # JWT access tokens cannot replace LIVEKIT_API_SECRET for agent worker auth.
+    if livekit_token.count(".") == 2:
+        raise RuntimeError(
+            "LIVEKIT_API_SECRET is missing and LIVEKIT_TOKEN looks like a JWT. "
+            "The agent worker requires LIVEKIT_API_SECRET (project secret), not a room token."
+        )
+
+    os.environ["LIVEKIT_API_SECRET"] = livekit_token
+
+
 def _load_agent_defaults() -> dict[str, object]:
     try:
         with DEFAULTS_PATH.open("rb") as f:
@@ -357,6 +376,7 @@ async def my_agent(ctx: agents.JobContext):
 
 
 if __name__ == "__main__":
+    _configure_livekit_auth()
     _print_project_inspection()
     agents.cli.run_app(server)
 
