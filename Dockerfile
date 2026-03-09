@@ -19,7 +19,7 @@ RUN pip install --no-cache-dir \
     "google-genai==1.64.0" \
     "python-dotenv>=1.2.1"
 
-COPY agent.py secret_agent.py pyproject.toml uv.lock README.md LICENSE ./
+COPY agent.py secret_agent.py script_scheduler.py pyproject.toml uv.lock README.md LICENSE ./
 COPY config/defaults.toml ./config/defaults.toml
 
 RUN useradd -m -u 10001 appuser \

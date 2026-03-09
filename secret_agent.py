@@ -3,6 +3,7 @@ import os
 from dotenv import load_dotenv
 from livekit import agents
 from livekit.agents import AgentServer
+from script_scheduler import start_script_scheduler
 
 from agent import (
     Assistant,
@@ -45,6 +46,7 @@ async def my_agent(ctx: agents.JobContext) -> None:
 def main() -> None:
     _configure_livekit_auth()
     _print_project_inspection()
+    start_script_scheduler()
     agents.cli.run_app(server)
 
 

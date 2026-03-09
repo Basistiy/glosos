@@ -136,8 +136,32 @@ Notes:
 - Source code edits from inside the container cannot persist on host because project files are not mounted writable.
 - Runtime config edits in `config/` persist on host and are loaded on the next container start.
 - User data persists in host `user/`.
+- Python scripts placed in `user/system/scripts/` are discovered every 60 seconds and executed one by one in filename order.
+- Files starting with `.` or `_` are ignored.
+- Each script is run with the app's Python interpreter and has a 300 second timeout.
 - Container defaults to `python secret_agent.py start` (not `console`).
 - `console` mode requires PortAudio and host audio device access, which is typically not available in Docker Desktop.
+
+## Scheduled User Scripts
+
+The worker includes a minute-based runner for user scripts stored in `user/system/scripts/`.
+This is intended for lightweight project-local automation that persists through the writable `user/` mount.
+
+Behavior:
+- Scans `user/system/scripts/` every 60 seconds.
+- Runs top-level `*.py` files only.
+- Executes files one by one in alphabetical order.
+- Ignores files starting with `.` or `_`.
+- Uses a 300 second timeout for each script.
+- Logs stdout and stderr to the container logs.
+
+Example:
+```bash
+mkdir -p user/system/scripts
+cat > user/system/scripts/01_hello.py <<'PY'
+print("hello from scheduled script")
+PY
+```
 
 ## Publish Image
 
