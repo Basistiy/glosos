@@ -20,10 +20,10 @@ RUN pip install --no-cache-dir \
     "python-dotenv>=1.2.1"
 
 COPY agent.py secret_agent.py pyproject.toml uv.lock README.md LICENSE ./
-COPY config ./config
+COPY config/defaults.toml ./config/defaults.toml
 
 RUN useradd -m -u 10001 appuser \
-    && mkdir -p /app/user \
+    && mkdir -p /app/config /app/user \
     && chown -R appuser:appuser /app
 
 USER appuser

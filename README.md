@@ -31,6 +31,7 @@ Configured pipeline in `agent.py`:
 - [`agent.py`](agent.py): shared agent implementation and runtime helpers
 - [`secret_agent.py`](secret_agent.py): LiveKit worker startup (API key/secret mode)
 - [`config/defaults.toml`](config/defaults.toml): committed non-secret runtime defaults
+- [`docker-compose.yml`](docker-compose.yml): runtime setup for the published container image
 - [`pyproject.toml`](pyproject.toml): project metadata and dependencies
 - [`uv.lock`](uv.lock): locked dependency graph
 
@@ -96,9 +97,9 @@ If you need available CLI options from LiveKit Agents:
 uv run python secret_agent.py --help
 ```
 
-## Run In Container (Project Read-Only, `user/` Writable, `config/` Mounted Read-Only)
+## Run In Container (Published Image, `user/` Writable, `config/` Mounted Read-Only)
 
-This setup runs the full agent inside Docker while keeping container root filesystem read-only.
+This setup runs the published Docker image while keeping the container root filesystem read-only.
 The host `./config` directory is mounted read-only at `/app/config`, so changes to
 `config/defaults.toml` are picked up on container restart without rebuilding the image.
 Only `./user` from the host is mounted as writable at `/app/user`.
@@ -115,9 +116,9 @@ cp .env.example config/.env
 mkdir -p user
 ```
 
-4. Build and run:
+4. Start the published image:
 ```bash
-docker compose up --build
+docker compose up
 ```
 
 5. After changing files under `config/`, restart the container without rebuilding:
@@ -131,11 +132,21 @@ docker compose down
 ```
 
 Notes:
-- Source code edits from inside the agent cannot persist on host because project files are not mounted writable.
+- The default image is `ghcr.io/basistiy/glosos:latest`. Override it with `GLOSOS_IMAGE=...` if needed.
+- Source code edits from inside the container cannot persist on host because project files are not mounted writable.
 - Runtime config edits in `config/` persist on host and are loaded on the next container start.
 - User data persists in host `user/`.
 - Container defaults to `python secret_agent.py start` (not `console`).
 - `console` mode requires PortAudio and host audio device access, which is typically not available in Docker Desktop.
+
+## Publish Image
+
+Publish `ghcr.io/basistiy/glosos` manually with standard Docker commands, for example:
+
+```bash
+docker build -t ghcr.io/basistiy/glosos:latest .
+docker push ghcr.io/basistiy/glosos:latest
+```
 
 ## Notes
 

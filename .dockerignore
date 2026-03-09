@@ -4,4 +4,6 @@
 __pycache__/
 *.pyc
 .env
+config/.env
+config/google-service-account.json
 user/

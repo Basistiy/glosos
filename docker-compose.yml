@@ -1,8 +1,7 @@
 services:
   agent:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${GLOSOS_IMAGE:-ghcr.io/basistiy/glosos:latest}
+    pull_policy: always
     read_only: true
     tmpfs:
       - /tmp
