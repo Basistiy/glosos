@@ -1,8 +1,7 @@
 services:
   agent:
-    build:
-      context: .
-    image: ${GLOSOS_IMAGE:-glosos:local}
+    image: ${GLOSOS_IMAGE:-ghcr.io/basistiy/glosos:latest}
+    pull_policy: always
     read_only: true
     tmpfs:
       - /tmp

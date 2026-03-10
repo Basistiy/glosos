@@ -52,7 +52,8 @@ Create a local `config/.env` file with secrets:
 - `LIVEKIT_API_KEY`
 - `LIVEKIT_API_SECRET`
 
-Place your Google service account JSON at `config/google-service-account.json`.
+Google credentials are read from:
+- `config/google-service-account.json`.
 
 Startup fails fast if required secrets/settings are missing or invalid.
 
@@ -99,40 +100,58 @@ uv run python secret_agent.py --help
 
 ## Run In Container (Published Image, `user/` Writable, `config/` Mounted Read-Only)
 
-This setup runs the published Docker image while keeping the container root filesystem read-only.
+This setup pulls the published Docker image while keeping the container root filesystem read-only.
 The host `./config` directory is mounted read-only at `/app/config`, so changes to
 `config/defaults.toml` are picked up on container restart without rebuilding the image.
 Only `./user` from the host is mounted as writable at `/app/user`.
 
-1. Prepare environment:
+1. Run interactive setup once:
 ```bash
-cp .env.example config/.env
+bash scripts/setup.sh
 ```
 
-2. Place your Google service account file at `config/google-service-account.json`.
-
-3. Ensure user directory exists:
+You can also copy the script anywhere and run it there to create a standalone runtime folder:
 ```bash
-mkdir -p user
+bash setup.sh
+```
+Or choose a target directory explicitly:
+```bash
+bash setup.sh /absolute/path/to/glosos-runtime
 ```
 
-4. Start the published image:
+2. Start the published image:
 ```bash
-docker compose up
+docker compose -f docker-compose.glosos.yml up -d
 ```
 
-5. After changing files under `config/`, restart the container without rebuilding:
+3. After changing files under `config/`, restart the container without rebuilding:
 ```bash
-docker compose restart
+docker compose -f docker-compose.glosos.yml restart
 ```
 
-6. Stop:
+4. Stop:
 ```bash
-docker compose down
+docker compose -f docker-compose.glosos.yml down
 ```
+
+### Interactive Post-Install Setup
+
+After installation, run this once to input secrets interactively:
+
+```bash
+bash scripts/setup.sh
+```
+
+The script will:
+- create all required runtime files (`config/defaults.toml`, `config/.env`, `config/google-service-account.json`, `user/`, `docker-compose.glosos.yml`),
+- ask for `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET`,
+- import Google service account JSON from a file path (you can drag and drop the JSON file into terminal to auto-fill the path),
+- pull `ghcr.io/basistiy/glosos:latest` (or `GLOSOS_IMAGE` if set),
+- optionally start `docker compose -f docker-compose.glosos.yml up -d` immediately.
 
 Notes:
 - The default image is `ghcr.io/basistiy/glosos:latest`. Override it with `GLOSOS_IMAGE=...` if needed.
+- `docker-compose.yml` is optimized for end users (pulls prebuilt image). For local image builds, use `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build`.
 - Source code edits from inside the container cannot persist on host because project files are not mounted writable.
 - Runtime config edits in `config/` persist on host and are loaded on the next container start.
 - User data persists in host `user/`.

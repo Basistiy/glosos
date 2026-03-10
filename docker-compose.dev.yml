@@ -1,0 +1,6 @@
+services:
+  agent:
+    build:
+      context: .
+    image: glosos:local
+    pull_policy: never
