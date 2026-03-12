@@ -17,7 +17,26 @@ RUN pip install --no-cache-dir \
     "livekit-agents[google,silero,turn-detector]~=1.4" \
     "livekit-plugins-noise-cancellation~=0.2" \
     "google-genai==1.64.0" \
-    "python-dotenv>=1.2.1"
+    "python-dotenv>=1.2.1" \
+    "pypdf" \
+    "pdfplumber" \
+    "pandas" \
+    "matplotlib" \
+    "openpyxl" \
+    "xlsxwriter" \
+    "pyarrow" \
+    "orjson" \
+    "ruamel.yaml" \
+    "Pillow" \
+    "python-docx" \
+    "python-pptx" \
+    "reportlab" \
+    "httpx" \
+    "beautifulsoup4" \
+    "lxml" \
+    "trafilatura" \
+    "feedparser" \
+    "duckduckgo-search"
 
 COPY agent.py secret_agent.py script_scheduler.py pyproject.toml uv.lock README.md LICENSE ./
 COPY config/defaults.toml ./config/defaults.toml
