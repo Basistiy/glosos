@@ -119,6 +119,19 @@ def _read_pyproject(pyproject_path: Path) -> tuple[str, str, str, int]:
     return (name, version, requires_python, len(dependencies))
 
 
+def _list_user_files(user_root: Path) -> list[str]:
+    if not user_root.exists() or not user_root.is_dir():
+        return []
+
+    files: list[str] = []
+    for path in sorted(user_root.rglob("*")):
+        if not path.is_file():
+            continue
+        rel_from_root = path.relative_to(ROOT).as_posix()
+        files.append(rel_from_root)
+    return files
+
+
 def _build_project_context() -> str:
     key_files = (
         "README.md",
@@ -131,6 +144,8 @@ def _build_project_context() -> str:
     name, version, requires_python, dependency_count = _read_pyproject(ROOT / "pyproject.toml")
     existing_files = [file_name for file_name in key_files if (ROOT / file_name).exists()]
     missing_files = [file_name for file_name in key_files if not (ROOT / file_name).exists()]
+    user_root = ROOT / "user"
+    user_files = _list_user_files(user_root)
 
     context_lines = [
         "Project context for your own source code:",
@@ -144,7 +159,15 @@ def _build_project_context() -> str:
         "- llm-provider: vertex-ai-service-account",
         f"- key-files-present: {', '.join(existing_files) if existing_files else 'none'}",
         f"- key-files-missing: {', '.join(missing_files) if missing_files else 'none'}",
+        f"- user-root: {user_root if user_root.exists() else f'{user_root} (missing)'}",
+        f"- user-files-count: {len(user_files)}",
     ]
+    if user_files:
+        context_lines.append("- user-files:")
+        context_lines.extend(f"  - {path}" for path in user_files)
+    else:
+        context_lines.append("- user-files: none")
+
     return "\n".join(context_lines)
 
 
