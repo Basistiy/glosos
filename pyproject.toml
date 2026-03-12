@@ -13,7 +13,6 @@ dependencies = [
     "matplotlib",
     "openpyxl",
     "xlsxwriter",
-    "pyarrow",
     "orjson",
     "ruamel.yaml",
     "Pillow",

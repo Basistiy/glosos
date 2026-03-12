@@ -24,7 +24,6 @@ RUN pip install --no-cache-dir \
     "matplotlib" \
     "openpyxl" \
     "xlsxwriter" \
-    "pyarrow" \
     "orjson" \
     "ruamel.yaml" \
     "Pillow" \
