@@ -4,8 +4,10 @@ import subprocess
 import sys
 import asyncio
 from pathlib import Path
+from typing import Awaitable, Callable
 
 import tomllib
+from livekit import rtc
 from google.genai import types as genai_types
 from livekit.agents import Agent, AgentSession, function_tool
 from livekit.plugins import google, silero
@@ -95,6 +97,7 @@ MIN_ENDPOINTING_DELAY = _required_float_setting("MIN_ENDPOINTING_DELAY")
 MAX_ENDPOINTING_DELAY = _required_float_setting("MAX_ENDPOINTING_DELAY")
 MAX_TOOL_OUTPUT_CHARS = 4000
 PYTHON_TOOL_TIMEOUT_SECONDS = 10
+MAX_SEND_FILE_BYTES = 25 * 1024 * 1024
 USER_SYSTEM_INSTRUCTIONS_PATH = Path("user/system/instructions.md")
 DEFAULT_USER_SYSTEM_INSTRUCTIONS = """This file is loaded into the agent system instructions at startup.
 Keep the text concise and task-focused.
@@ -245,9 +248,75 @@ def build_agent_session() -> AgentSession:
     )
 
 
+FileSendFn = Callable[[Path, str, list[str]], Awaitable[str]]
+DEFAULT_INCOMING_FILES_TOPIC = "lk.chat"
+DEFAULT_INCOMING_FILES_DIR = ROOT / "user" / "incoming"
+
+
+def _stream_info_value(info: object, key: str) -> str:
+    if hasattr(info, key):
+        value = getattr(info, key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    if isinstance(info, dict):
+        value = info.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _unique_file_path(base_dir: Path, file_name: str) -> Path:
+    candidate = base_dir / file_name
+    if not candidate.exists():
+        return candidate
+    stem = candidate.stem or "file"
+    suffix = candidate.suffix
+    for index in range(1, 1000):
+        next_path = base_dir / f"{stem}-{index}{suffix}"
+        if not next_path.exists():
+            return next_path
+    raise RuntimeError(f"too many files with name prefix: {stem}")
+
+
+def register_incoming_file_handler(
+    room: rtc.Room,
+    *,
+    topic: str = DEFAULT_INCOMING_FILES_TOPIC,
+    save_dir: Path = DEFAULT_INCOMING_FILES_DIR,
+) -> None:
+    save_dir.mkdir(parents=True, exist_ok=True)
+    active_tasks: set[asyncio.Task[None]] = set()
+
+    async def _persist_file(reader: rtc.ByteStreamReader, participant_identity: str) -> None:
+        info = reader.info
+        stream_id = _stream_info_value(info, "id") or "stream"
+        incoming_name = _stream_info_value(info, "name")
+        safe_name = Path(incoming_name).name if incoming_name else ""
+        if not safe_name:
+            safe_name = f"{stream_id}.bin"
+
+        target = _unique_file_path(save_dir, safe_name)
+        with target.open("wb") as f:
+            async for chunk in reader:
+                f.write(chunk)
+        print(
+            f"[files] received {target.name} from {participant_identity} "
+            f"on topic={topic} stream_id={stream_id} saved_to={target}"
+        )
+
+    def _handle_stream(reader: rtc.ByteStreamReader, participant_identity: str) -> None:
+        task = asyncio.create_task(_persist_file(reader, participant_identity))
+        active_tasks.add(task)
+        task.add_done_callback(lambda t: active_tasks.discard(t))
+
+    room.register_byte_stream_handler(topic, _handle_stream)
+
+
 class Assistant(Agent):
-    def __init__(self, project_context: str) -> None:
+    def __init__(self, project_context: str, send_file_fn: FileSendFn | None = None) -> None:
         root = Path(__file__).resolve().parent
+        self._root = root
+        self._send_file_fn = send_file_fn
         user_system_instructions = _read_user_system_instructions(root)
         super().__init__(
             instructions="""You are a helpful voice AI assistant.
@@ -255,6 +324,7 @@ class Assistant(Agent):
             Your responses are concise, to the point, and without any complex formatting or punctuation including emojis, asterisks, or other symbols.
             You can execute Python in your own project using the execute_python tool. Use python to read files, inspect the environment, perform calculations, making network requests.
             You can create and manage recurring background tasks by writing Python scripts to app/user/system/scripts which are executed every 60 seconds by script_scheduler.py.
+            You can send files to the user using the send_file_to_user tool.
             All text files created should be in .md format unless another format is specified.
             If you need to log some data like meal calories or weight tracking, create or update .json files in the /app/user directory.
             Api keys are stored in user/system/keys.md.
@@ -300,3 +370,51 @@ class Assistant(Agent):
         if len(combined) > MAX_TOOL_OUTPUT_CHARS:
             combined = combined[:MAX_TOOL_OUTPUT_CHARS] + "\n...<truncated>"
         return combined
+
+    @function_tool
+    async def send_file_to_user(
+        self,
+        file_path: str,
+        topic: str = DEFAULT_INCOMING_FILES_TOPIC,
+        destination_identity: str = "",
+    ) -> str:
+        """Send a local file to a participant over LiveKit byte streams."""
+        if self._send_file_fn is None:
+            return "file sending is not configured for this agent session"
+
+        requested = Path(file_path.strip()).expanduser()
+        user_root = (self._root / "user").resolve()
+        if requested.is_absolute():
+            resolved = requested.resolve()
+        else:
+            resolved = (user_root / requested).resolve()
+
+        try:
+            resolved.relative_to(user_root)
+        except ValueError:
+            return (
+                f"invalid path: {resolved}. "
+                f"Only files under {user_root} can be sent."
+            )
+
+        if not resolved.exists():
+            return f"file not found: {resolved}"
+        if not resolved.is_file():
+            return f"path is not a file: {resolved}"
+        file_size = resolved.stat().st_size
+        if file_size > MAX_SEND_FILE_BYTES:
+            return (
+                f"file is too large ({file_size} bytes). "
+                f"Maximum allowed size is {MAX_SEND_FILE_BYTES} bytes."
+            )
+
+        destinations = [destination_identity.strip()] if destination_identity.strip() else []
+        stream_id = await self._send_file_fn(
+            resolved,
+            topic.strip() or DEFAULT_INCOMING_FILES_TOPIC,
+            destinations,
+        )
+        return (
+            f"sent file {resolved.name} ({file_size} bytes) on topic "
+            f"{topic.strip() or DEFAULT_INCOMING_FILES_TOPIC} with stream_id={stream_id}"
+        )

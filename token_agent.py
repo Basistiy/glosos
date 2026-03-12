@@ -1,5 +1,6 @@
 import asyncio
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 from livekit import rtc
@@ -10,6 +11,7 @@ from agent import (
     _build_project_context,
     _print_project_inspection,
     build_agent_session,
+    register_incoming_file_handler,
 )
 
 load_dotenv("config/.env")
@@ -29,6 +31,7 @@ async def run_token_agent() -> None:
 
     room = rtc.Room()
     disconnected = asyncio.Event()
+    register_incoming_file_handler(room)
 
     @room.on("disconnected")
     def _on_disconnected(reason: object) -> None:
@@ -36,13 +39,21 @@ async def run_token_agent() -> None:
         disconnected.set()
 
     session = build_agent_session()
+    
+    async def _send_file(path: Path, topic: str, destination_identities: list[str]) -> str:
+        info = await room.local_participant.send_file(
+            str(path),
+            topic=topic,
+            destination_identities=destination_identities,
+        )
+        return info.stream_id
 
     await room.connect(LIVEKIT_URL, livekit_token)
     print(f"[token-agent] connected to room: {room.name}")
 
     await session.start(
         room=room,
-        agent=Assistant(project_context=project_context),
+        agent=Assistant(project_context=project_context, send_file_fn=_send_file),
     )
 
     await session.generate_reply(
