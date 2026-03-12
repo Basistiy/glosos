@@ -355,6 +355,7 @@ class Assistant(Agent):
             If you need to log some data like meal calories or weight tracking, create or update .json files in the /app/user directory.
             Api keys are stored in user/system/keys.md.
             Store all user data files and tracking files in the /app/user directory. You have read/write access to this directory and its subdirectories.
+            When a user sends a file, it is stored in /app/user/incoming.
             When users ask about your behavior, capabilities, dependencies, setup, or files, ground your answers in this context:
 
 
