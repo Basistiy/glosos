@@ -188,3 +188,5 @@ cython_debug/
 .cursorindexingignore
 
 .DS_Store
+alive.txt
+.DS_Store

@@ -9,7 +9,8 @@ from typing import Awaitable, Callable
 import tomllib
 from livekit import rtc
 from google.genai import types as genai_types
-from livekit.agents import Agent, AgentSession, function_tool
+from livekit.agents import Agent, AgentSession, function_tool, get_job_context
+from livekit.agents.llm import ImageContent
 from livekit.plugins import google, silero
 
 ROOT = Path(__file__).resolve().parent
@@ -340,6 +341,9 @@ class Assistant(Agent):
         root = Path(__file__).resolve().parent
         self._root = root
         self._send_file_fn = send_file_fn
+        self._latest_frame: object | None = None
+        self._video_stream: rtc.VideoStream | None = None
+        self._video_tasks: set[asyncio.Task[None]] = set()
         user_system_instructions = _read_user_system_instructions(root)
         super().__init__(
             instructions="""You are a helpful voice AI assistant.
@@ -368,6 +372,55 @@ class Assistant(Agent):
             """
             + user_system_instructions,
         )
+
+    async def on_enter(self) -> None:
+        room = get_job_context().room
+
+        def _attach_track(track: rtc.Track) -> None:
+            if track.kind != rtc.TrackKind.KIND_VIDEO:
+                return
+            self._create_video_stream(track)
+
+        for participant in room.remote_participants.values():
+            for publication in participant.track_publications.values():
+                if publication.track is not None:
+                    _attach_track(publication.track)
+
+        @room.on("track_subscribed")
+        def _on_track_subscribed(
+            track: rtc.Track,
+            publication: rtc.RemoteTrackPublication,
+            participant: rtc.RemoteParticipant,
+        ) -> None:
+            del publication, participant
+            _attach_track(track)
+
+    async def on_user_turn_completed(self, turn_ctx: object, new_message: object) -> None:
+        del turn_ctx
+        if self._latest_frame is None:
+            return
+        if not hasattr(new_message, "content"):
+            return
+        content = getattr(new_message, "content")
+        if not isinstance(content, list):
+            return
+        content.append(ImageContent(image=self._latest_frame))
+        self._latest_frame = None
+
+    def _create_video_stream(self, track: rtc.Track) -> None:
+        if self._video_stream is not None:
+            self._video_stream.close()
+
+        self._video_stream = rtc.VideoStream(track)
+        stream = self._video_stream
+
+        async def _read_stream() -> None:
+            async for event in stream:
+                self._latest_frame = event.frame
+
+        task = asyncio.create_task(_read_stream())
+        self._video_tasks.add(task)
+        task.add_done_callback(lambda t: self._video_tasks.discard(t))
 
     @function_tool
     async def execute_python(self, code: str) -> str:
