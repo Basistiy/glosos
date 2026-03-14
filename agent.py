@@ -139,7 +139,7 @@ def _build_project_context() -> str:
         "agent.py",
         "pyproject.toml",
         "uv.lock",
-        ".env.example",
+        "config/.env.example",
         "config/defaults.toml",
     )
     name, version, requires_python, dependency_count = _read_pyproject(ROOT / "pyproject.toml")
@@ -337,10 +337,16 @@ def register_incoming_file_handler(
 
 
 class Assistant(Agent):
-    def __init__(self, project_context: str, send_file_fn: FileSendFn | None = None) -> None:
+    def __init__(
+        self,
+        project_context: str,
+        send_file_fn: FileSendFn | None = None,
+        room: rtc.Room | None = None,
+    ) -> None:
         root = Path(__file__).resolve().parent
         self._root = root
         self._send_file_fn = send_file_fn
+        self._room = room
         self._latest_frame: object | None = None
         self._video_stream: rtc.VideoStream | None = None
         self._video_tasks: set[asyncio.Task[None]] = set()
@@ -374,7 +380,9 @@ class Assistant(Agent):
         )
 
     async def on_enter(self) -> None:
-        room = get_job_context().room
+        room = self._room
+        if room is None:
+            room = get_job_context().room
 
         def _attach_track(track: rtc.Track) -> None:
             if track.kind != rtc.TrackKind.KIND_VIDEO:

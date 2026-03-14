@@ -30,6 +30,9 @@ Configured pipeline in `agent.py`:
 
 - [`agent.py`](agent.py): shared agent implementation and runtime helpers
 - [`secret_agent.py`](secret_agent.py): LiveKit worker startup (API key/secret mode)
+- [`token_agent.py`](token_agent.py): token-based agent participant runtime
+- [`run_token_agent.py`](run_token_agent.py): helper that mints a local LiveKit token from API key/secret
+- [`run_token_agent_firebase.py`](run_token_agent_firebase.py): helper that signs in to Firebase (username/password) and fetches a LiveKit token from your backend
 - [`config/defaults.toml`](config/defaults.toml): committed non-secret runtime defaults
 - [`docker-compose.yml`](docker-compose.yml): runtime setup for the published container image
 - [`pyproject.toml`](pyproject.toml): project metadata and dependencies
@@ -61,7 +64,7 @@ Keep `config/.env` and `config/google-service-account.json` private and never co
 The app reads secrets only from `config/`.
 You can bootstrap from the template:
 ```bash
-cp .env.example config/.env
+cp config/.env.example config/.env
 ```
 
 ## Run Locally
@@ -71,7 +74,7 @@ cp .env.example config/.env
 uv sync
 ```
 
-2. Set secret environment variables in `config/.env` (see `.env.example`), then start the agent:
+2. Set secret environment variables in `config/.env` (see `config/.env.example`), then start the agent:
 ```bash
 uv run python secret_agent.py
 ```
@@ -92,6 +95,25 @@ Optional token-generation env vars:
 - `LIVEKIT_IDENTITY` (default: `token-agent`)
 - `LIVEKIT_CLIENT_IDENTITY` (default: `human-test`)
 - `LIVEKIT_TOKEN_TTL_SECONDS` (default: `3600`)
+
+Token-only participant mode with Firebase username/password auth + backend token endpoint:
+```bash
+uv run python run_token_agent_firebase.py
+```
+Works with Firebase Callable (`onCall`) endpoints by default (`{"data": ...}` request / `{"result": ...}` response).
+
+Required non-secret config in `config/defaults.toml` (`[agent]`):
+- `FIREBASE_WEB_API_KEY`
+- `FIREBASE_LIVEKIT_TOKEN_URL`
+
+Required env vars:
+- `FIREBASE_AUTH_USERNAME` (or `FIREBASE_AUTH_EMAIL`)
+- `FIREBASE_AUTH_PASSWORD`
+
+Optional env vars:
+- `FIREBASE_AGENT_NAME` (sent as `request.data.agentName` for callable functions)
+- `LIVEKIT_TARGET_UID` (defaults to the authenticated Firebase uid)
+- `FIREBASE_LIVEKIT_TOKEN_REQUEST_JSON` (raw JSON override for your token endpoint request body)
 
 If you need available CLI options from LiveKit Agents:
 ```bash

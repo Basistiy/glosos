@@ -53,7 +53,7 @@ async def run_token_agent() -> None:
 
     await session.start(
         room=room,
-        agent=Assistant(project_context=project_context, send_file_fn=_send_file),
+        agent=Assistant(project_context=project_context, send_file_fn=_send_file, room=room),
     )
 
     await session.generate_reply(
