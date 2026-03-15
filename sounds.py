@@ -47,6 +47,6 @@ async def emit_ready_sound(room: rtc.Room) -> None:
     finally:
         try:
             if publication is not None and getattr(publication, "sid", ""):
-                room.local_participant.unpublish_track(publication.sid)
+                await room.local_participant.unpublish_track(publication.sid)
         except Exception:
             pass
