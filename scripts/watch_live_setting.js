@@ -56,15 +56,16 @@ loadDotEnv(path.resolve(__dirname, "..", "config", ".env"));
 
 const firebaseConfig = {
   apiKey: requiredEnv("FIREBASE_WEB_API_KEY"),
-  projectId: optionalEnv("FIREBASE_PROJECT_ID", "glosos-103f7"),
+  authDomain: "glosos-103f7.firebaseapp.com",
+  projectId: "glosos-103f7",
+  storageBucket: "glosos-103f7.firebasestorage.app",
+  messagingSenderId: "314422729512",
+  appId: "1:314422729512:web:4fb8cb0278e64a5c374e1d",
+  measurementId: "G-KL0T4GHC6V",
 };
 
-const collectionName = optionalEnv("FIREBASE_USER_SETTINGS_COLLECTION", "user_settings");
-const configuredDocId = optionalEnv("FIREBASE_USER_SETTINGS_DOC_ID");
-const runCommand = optionalEnv(
-  "LIVE_AGENT_RUN_COMMAND",
-  "uv run python run_token_agent_firebase.py"
-);
+const collectionName = "user_settings";
+const runCommand = "uv run python run_token_agent_firebase.py";
 const projectRoot = path.resolve(__dirname, "..");
 
 const app = initializeApp(firebaseConfig);
@@ -129,17 +130,13 @@ process.on("SIGINT", () => cleanupAndExit("SIGINT"));
 process.on("SIGTERM", () => cleanupAndExit("SIGTERM"));
 
 async function resolveDocId() {
-  if (configuredDocId) {
-    return configuredDocId;
-  }
-
   const login =
-    optionalEnv("FIREBASE_AUTH_EMAIL") || optionalEnv("FIREBASE_AUTH_USERNAME");
-  const password = optionalEnv("FIREBASE_AUTH_PASSWORD");
+    optionalEnv("FIREBASE_AUTH_USERNAME") || optionalEnv("FIREBASE_AUTH_EMAIL");
+  const password = requiredEnv("FIREBASE_AUTH_PASSWORD");
 
-  if (!login || !password) {
+  if (!login) {
     throw new Error(
-      "Missing FIREBASE_USER_SETTINGS_DOC_ID. Set it explicitly, or provide FIREBASE_AUTH_EMAIL/FIREBASE_AUTH_USERNAME and FIREBASE_AUTH_PASSWORD to derive uid automatically."
+      "Missing FIREBASE_AUTH_USERNAME (or FIREBASE_AUTH_EMAIL) in config/.env."
     );
   }
 
