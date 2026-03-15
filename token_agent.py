@@ -1,9 +1,11 @@
 import asyncio
 import os
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
 from livekit import rtc
+from livekit.agents import llm as agents_llm
 from livekit.agents.voice import room_io
 
 from agent import (
@@ -18,6 +20,10 @@ from sounds import emit_ready_sound
 
 load_dotenv("config/.env")
 ATTRIBUTE_AGENT_STATE = "lk.agent.state"
+
+
+def _now_hms() -> str:
+    return datetime.now().strftime("%H:%M:%S")
 
 
 def _required_env(name: str) -> str:
@@ -65,6 +71,34 @@ async def run_token_agent() -> None:
         state_publish_tasks.add(task)
         task.add_done_callback(lambda t: state_publish_tasks.discard(t))
 
+    async def _warmup_llm() -> None:
+        llm_model = session.llm
+        if llm_model is None:
+            return
+        try:
+            llm_model.prewarm()
+        except Exception:
+            # Best-effort; not all plugins implement prewarm robustly.
+            pass
+
+        warm_ctx = agents_llm.ChatContext.empty()
+        warm_ctx.add_message(role="user", content="Reply with exactly: ok")
+        stream = None
+        try:
+            stream = llm_model.chat(chat_ctx=warm_ctx, tools=[])
+            async for _chunk in stream:
+                # First chunk is enough to warm provider path.
+                break
+            print(f"[{_now_hms()}] [token-agent] llm warmup complete")
+        except Exception as exc:
+            print(f"[token-agent] llm warmup skipped: {exc}")
+        finally:
+            if stream is not None:
+                try:
+                    await stream.aclose()
+                except Exception:
+                    pass
+
     @session.on("agent_state_changed")
     def _on_agent_state_changed(event: object) -> None:
         new_state = getattr(event, "new_state", "")
@@ -100,6 +134,8 @@ async def run_token_agent() -> None:
     )
     _schedule_state_publish("listening")
     await emit_ready_sound(room)
+    print(f"[{_now_hms()}] [token-agent] stt ready; llm warmup starting in background")
+    asyncio.create_task(_warmup_llm())
 
     await disconnected.wait()
 
