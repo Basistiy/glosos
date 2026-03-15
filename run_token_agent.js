@@ -52,7 +52,7 @@ function optionalEnv(name, fallback = "") {
   return value || fallback;
 }
 
-loadDotEnv(path.resolve(__dirname, "..", "config", ".env"));
+loadDotEnv(path.resolve(__dirname, "config", ".env"));
 
 const firebaseConfig = {
   apiKey: requiredEnv("FIREBASE_WEB_API_KEY"),
@@ -65,8 +65,10 @@ const firebaseConfig = {
 };
 
 const collectionName = "user_settings";
-const runCommand = "uv run python run_token_agent_firebase.py";
-const projectRoot = path.resolve(__dirname, "..");
+const tokenEndpointUrl = "https://getlivekittokenagent-wxo2praqea-uc.a.run.app";
+const firebaseAgentName = "";
+const runCommand = "uv run python token_agent.py";
+const projectRoot = path.resolve(__dirname);
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
@@ -75,18 +77,99 @@ const auth = getAuth(app);
 let lastLiveValue = null;
 let runningChild = null;
 
-function startAgentProcess() {
+function buildTokenRequestBody() {
+  const data = {};
+  if (firebaseAgentName) {
+    data.agentName = firebaseAgentName;
+  }
+  return { data };
+}
+
+function extractLivekitToken(response) {
+  const candidateObjects = [];
+  if (response && typeof response === "object") {
+    if (response.result && typeof response.result === "object") {
+      candidateObjects.push(response.result);
+    }
+    candidateObjects.push(response);
+  }
+
+  for (const obj of candidateObjects) {
+    for (const key of ["participantToken", "token", "livekitToken", "livekit_token", "jwt"]) {
+      const value = typeof obj[key] === "string" ? obj[key].trim() : "";
+      if (value) {
+        return value;
+      }
+    }
+  }
+
+  throw new Error(
+    "Token endpoint response does not include a token field. Expected one of: participantToken, token, livekitToken, livekit_token, jwt."
+  );
+}
+
+async function fetchLivekitToken() {
+  let user = auth.currentUser;
+  if (!user) {
+    const login =
+      optionalEnv("FIREBASE_AUTH_USERNAME") || optionalEnv("FIREBASE_AUTH_EMAIL");
+    const password = requiredEnv("FIREBASE_AUTH_PASSWORD");
+    if (!login) {
+      throw new Error(
+        "Missing FIREBASE_AUTH_USERNAME (or FIREBASE_AUTH_EMAIL) in config/.env."
+      );
+    }
+    const credential = await signInWithEmailAndPassword(auth, login, password);
+    user = credential.user;
+  }
+
+  const idToken = await user.getIdToken();
+  if (!idToken) {
+    throw new Error("Firebase sign-in succeeded without idToken.");
+  }
+
+  const payload = buildTokenRequestBody();
+  const response = await fetch(tokenEndpointUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const rawText = await response.text();
+  if (!response.ok) {
+    throw new Error(
+      `HTTP ${response.status} when calling token endpoint: ${rawText}\nToken endpoint request payload was: ${JSON.stringify(
+        payload
+      )}`
+    );
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch (err) {
+    throw new Error(`Invalid JSON response from token endpoint: ${rawText.slice(0, 500)}`);
+  }
+
+  return extractLivekitToken(parsed);
+}
+
+async function startAgentProcess() {
   if (runningChild && !runningChild.killed) {
     console.log("[live-watch] agent process already running, skip start");
     return;
   }
 
+  const livekitToken = await fetchLivekitToken();
   console.log(`[live-watch] starting agent: ${runCommand}`);
   runningChild = spawn(runCommand, {
     cwd: projectRoot,
     stdio: "inherit",
     shell: true,
-    env: process.env,
+    env: { ...process.env, LIVEKIT_TOKEN: livekitToken },
   });
 
   runningChild.on("exit", (code, signal) => {
@@ -169,7 +252,9 @@ async function main() {
       console.log(`[live-watch] live=${live}`);
 
       if (live && lastLiveValue !== true) {
-        startAgentProcess();
+        startAgentProcess().catch((err) => {
+          console.error("[live-watch] failed to start agent:", err);
+        });
       } else if (!live && lastLiveValue === true) {
         stopAgentProcess("live changed true -> false");
       }
