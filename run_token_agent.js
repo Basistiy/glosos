@@ -78,6 +78,9 @@ const auth = getAuth(app);
 let lastLiveValue = null;
 let runningChild = null;
 let latestAgentEnv = {};
+let desiredLive = false;
+let restartTimer = null;
+let restartAttempts = 0;
 
 function resolveRunCommand() {
   try {
@@ -169,9 +172,19 @@ async function fetchLivekitToken() {
 }
 
 async function startAgentProcess() {
+  if (!desiredLive) {
+    console.log("[live-watch] desiredLive=false, skip start");
+    return;
+  }
+
   if (runningChild && !runningChild.killed) {
     console.log("[live-watch] agent process already running, skip start");
     return;
+  }
+
+  if (restartTimer) {
+    clearTimeout(restartTimer);
+    restartTimer = null;
   }
 
   const livekitToken = await fetchLivekitToken();
@@ -188,10 +201,34 @@ async function startAgentProcess() {
       `[live-watch] agent process exited code=${code ?? "null"} signal=${signal ?? "null"}`
     );
     runningChild = null;
+    if (!desiredLive) {
+      restartAttempts = 0;
+      return;
+    }
+
+    restartAttempts += 1;
+    const delayMs = Math.min(10000, 500 * Math.pow(2, restartAttempts - 1));
+    console.log(
+      `[live-watch] scheduling restart in ${delayMs}ms (attempt ${restartAttempts})`
+    );
+    restartTimer = setTimeout(() => {
+      restartTimer = null;
+      startAgentProcess().catch((err) => {
+        console.error("[live-watch] failed to restart agent:", err);
+      });
+    }, delayMs);
   });
+
+  restartAttempts = 0;
 }
 
 function stopAgentProcess(reason = "live set to false") {
+  desiredLive = false;
+  if (restartTimer) {
+    clearTimeout(restartTimer);
+    restartTimer = null;
+  }
+
   if (!runningChild || runningChild.killed) {
     console.log("[live-watch] no running agent process to stop");
     return;
@@ -301,6 +338,7 @@ async function main() {
 
       const data = snapshot.data() || {};
       const live = data.live === true;
+      desiredLive = live;
       latestAgentEnv = buildAgentEnv(data);
       console.log(`[live-watch] live=${live}`);
       if (Object.keys(latestAgentEnv).length > 0) {
@@ -312,6 +350,10 @@ async function main() {
       if (live && lastLiveValue !== true) {
         startAgentProcess().catch((err) => {
           console.error("[live-watch] failed to start agent:", err);
+        });
+      } else if (live && !runningChild && !restartTimer) {
+        startAgentProcess().catch((err) => {
+          console.error("[live-watch] failed to ensure running agent:", err);
         });
       } else if (!live && lastLiveValue === true) {
         stopAgentProcess("live changed true -> false");
