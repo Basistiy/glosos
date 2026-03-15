@@ -13,6 +13,7 @@ from agent import (
     build_agent_session,
     register_incoming_file_handler,
 )
+from sounds import emit_ready_sound
 
 load_dotenv("config/.env")
 
@@ -55,10 +56,7 @@ async def run_token_agent() -> None:
         room=room,
         agent=Assistant(project_context=project_context, send_file_fn=_send_file, room=room),
     )
-
-    await session.generate_reply(
-        instructions="Greet the user and offer your assistance."
-    )
+    await emit_ready_sound(room)
 
     await disconnected.wait()
 
