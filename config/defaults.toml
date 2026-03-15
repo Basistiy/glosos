@@ -13,5 +13,4 @@ MIN_ENDPOINTING_DELAY = 0.1
 MAX_ENDPOINTING_DELAY = 0.6
 
 # Non-secret Firebase settings for run_token_agent_firebase.py
-FIREBASE_WEB_API_KEY = "AIzaSyAdj8z43qFcfJvserUPVUoNhG1GhQlFkC8"
 FIREBASE_LIVEKIT_TOKEN_URL = "https://getlivekittokenagent-wxo2praqea-uc.a.run.app"
