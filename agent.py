@@ -111,6 +111,7 @@ STT_LANGUAGE_BY_AGENT_LANGUAGE = {
     "polish": "pl-PL",
     "spanish": "es-ES",
 }
+ENGLISH_STT_FALLBACK = "en-US"
 
 
 def _read_pyproject(pyproject_path: Path) -> tuple[str, str, str, int]:
@@ -261,9 +262,12 @@ def _resolved_tts_voice_name() -> str:
     return TTS_VOICE_NAME
 
 
-def _resolved_stt_language() -> str:
+def _resolved_stt_languages() -> str | list[str]:
     agent_language = (os.getenv("AGENT_LANGUAGE") or "").strip().lower()
-    return STT_LANGUAGE_BY_AGENT_LANGUAGE.get(agent_language, STT_LANGUAGE)
+    primary_language = STT_LANGUAGE_BY_AGENT_LANGUAGE.get(agent_language, STT_LANGUAGE)
+    if primary_language.lower() == ENGLISH_STT_FALLBACK.lower():
+        return primary_language
+    return [primary_language, ENGLISH_STT_FALLBACK]
 
 
 def _resolved_agent_name() -> str:
@@ -284,12 +288,12 @@ def build_agent_session() -> AgentSession:
     google_credentials_file = _google_credentials_file()
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = google_credentials_file
     tts_voice_name = _resolved_tts_voice_name()
-    stt_language = _resolved_stt_language()
+    stt_languages = _resolved_stt_languages()
     return AgentSession(
         stt=google.STT(
             model=STT_MODEL,
             location=GOOGLE_STT_LOCATION,
-            languages=stt_language,
+            languages=stt_languages,
             detect_language=False,
             spoken_punctuation=False,
             use_streaming=STT_USE_STREAMING,
