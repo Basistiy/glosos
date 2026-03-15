@@ -3,9 +3,9 @@
 const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
-const { initializeApp } = require("firebase/app");
-const { getAuth, signInWithEmailAndPassword } = require("firebase/auth");
-const { getFirestore, doc, onSnapshot } = require("firebase/firestore");
+const { initializeApp } = require("@firebase/app");
+const { getAuth, signInWithEmailAndPassword } = require("@firebase/auth");
+const { getFirestore, doc, onSnapshot } = require("@firebase/firestore");
 
 function loadDotEnv(filePath) {
   if (!fs.existsSync(filePath)) {

@@ -39,14 +39,18 @@ RUN pip install --no-cache-dir \
     "feedparser" \
     "duckduckgo-search"
 
-RUN npm install --no-save firebase
-
-COPY agent.py secret_agent.py token_agent.py run_token_agent.js script_scheduler.py pyproject.toml uv.lock README.md LICENSE ./
-COPY config/defaults.toml ./config/defaults.toml
+RUN npm install --no-save --omit=dev \
+    @firebase/app \
+    @firebase/auth \
+    @firebase/firestore \
+    && npm cache clean --force \
+    && rm -rf /root/.npm
 
 RUN useradd -m -u 10001 appuser \
-    && mkdir -p /app/config /app/user \
-    && chown -R appuser:appuser /app
+    && mkdir -p /app/config /app/user
+
+COPY --chown=10001:10001 agent.py secret_agent.py token_agent.py run_token_agent.js script_scheduler.py pyproject.toml uv.lock README.md LICENSE ./
+COPY --chown=10001:10001 config/defaults.toml ./config/defaults.toml
 
 USER appuser
 
