@@ -56,12 +56,7 @@ loadDotEnv(path.resolve(__dirname, "..", "config", ".env"));
 
 const firebaseConfig = {
   apiKey: requiredEnv("FIREBASE_WEB_API_KEY"),
-  authDomain: optionalEnv("FIREBASE_AUTH_DOMAIN", "glosos-103f7.firebaseapp.com"),
   projectId: optionalEnv("FIREBASE_PROJECT_ID", "glosos-103f7"),
-  storageBucket: optionalEnv("FIREBASE_STORAGE_BUCKET", "glosos-103f7.firebasestorage.app"),
-  messagingSenderId: optionalEnv("FIREBASE_MESSAGING_SENDER_ID", "314422729512"),
-  appId: optionalEnv("FIREBASE_APP_ID", "1:314422729512:web:4fb8cb0278e64a5c374e1d"),
-  measurementId: optionalEnv("FIREBASE_MEASUREMENT_ID", "G-KL0T4GHC6V"),
 };
 
 const collectionName = optionalEnv("FIREBASE_USER_SETTINGS_COLLECTION", "user_settings");
