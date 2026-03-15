@@ -8,9 +8,9 @@ from livekit import rtc
 async def emit_ready_sound(room: rtc.Room) -> None:
     sample_rate = 48000
     num_channels = 1
-    frequency_hz = 200.0
-    duration_seconds = 0.5
-    amplitude = 0.22
+    frequency_hz = 400.0
+    duration_seconds = 0.3
+    amplitude = 0.35
     samples_per_chunk = 960  # 20ms at 48kHz
 
     source = rtc.AudioSource(sample_rate=sample_rate, num_channels=num_channels)
@@ -38,7 +38,7 @@ async def emit_ready_sound(room: rtc.Room) -> None:
             )
             await source.capture_frame(frame)
 
-        await asyncio.sleep(0.05)
+        await source.wait_for_playout()
     except Exception as exc:
         print(f"[token-agent] failed to play ready sound: {exc}")
         # Last-resort local bell if audio publishing path fails.
@@ -47,6 +47,6 @@ async def emit_ready_sound(room: rtc.Room) -> None:
     finally:
         try:
             if publication is not None and getattr(publication, "sid", ""):
-                room.local_participant.unpublish_track(publication.sid)
+                await room.local_participant.unpublish_track(publication.sid)
         except Exception:
             pass
