@@ -39,12 +39,13 @@ if [[ -z "${livekit_url:-}" ]]; then
   exit 1
 fi
 
-read -r -p "LIVEKIT_API_KEY: " livekit_api_key
-read -r -s -p "LIVEKIT_API_SECRET: " livekit_api_secret
+read -r -p "FIREBASE_WEB_API_KEY: " firebase_web_api_key
+read -r -p "FIREBASE_AUTH_USERNAME (email): " firebase_auth_username
+read -r -s -p "FIREBASE_AUTH_PASSWORD: " firebase_auth_password
 echo
 
-if [[ -z "${livekit_api_key:-}" || -z "${livekit_api_secret:-}" ]]; then
-  echo "LIVEKIT_API_KEY and LIVEKIT_API_SECRET are required."
+if [[ -z "${firebase_web_api_key:-}" || -z "${firebase_auth_username:-}" || -z "${firebase_auth_password:-}" ]]; then
+  echo "FIREBASE_WEB_API_KEY, FIREBASE_AUTH_USERNAME, and FIREBASE_AUTH_PASSWORD are required."
   exit 1
 fi
 
@@ -65,12 +66,9 @@ MAX_ENDPOINTING_DELAY = 0.6
 EOF
 
 cat > "$ENV_FILE" <<EOF
-LIVEKIT_API_KEY=$livekit_api_key
-LIVEKIT_API_SECRET=$livekit_api_secret
-LIVEKIT_ROOM=default-room
-LIVEKIT_IDENTITY=token-agent
-LIVEKIT_CLIENT_IDENTITY=human-test
-LIVEKIT_TOKEN_TTL_SECONDS=3600
+FIREBASE_WEB_API_KEY=$firebase_web_api_key
+FIREBASE_AUTH_USERNAME=$firebase_auth_username
+FIREBASE_AUTH_PASSWORD=$firebase_auth_password
 EOF
 
 chmod 600 "$ENV_FILE"
@@ -118,7 +116,7 @@ services:
     cap_drop:
       - ALL
     restart: unless-stopped
-    command: ["python", "secret_agent.py", "start"]
+    command: ["node", "run_token_agent.js"]
 EOF
 
 echo

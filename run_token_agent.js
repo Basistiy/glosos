@@ -67,7 +67,7 @@ const firebaseConfig = {
 const collectionName = "user_settings";
 const tokenEndpointUrl = "https://getlivekittokenagent-wxo2praqea-uc.a.run.app";
 const firebaseAgentName = "";
-const runCommand = "uv run python token_agent.py";
+const runCommand = "python token_agent.py";
 const projectRoot = path.resolve(__dirname);
 
 const app = initializeApp(firebaseConfig);

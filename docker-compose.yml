@@ -15,4 +15,4 @@ services:
     cap_drop:
       - ALL
     restart: unless-stopped
-    command: ["python", "secret_agent.py", "start"]
+    command: ["node", "run_token_agent.js"]

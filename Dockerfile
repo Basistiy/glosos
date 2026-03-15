@@ -11,6 +11,8 @@ RUN apt-get update \
         ca-certificates \
         libglib2.0-0 \
         libstdc++6 \
+        nodejs \
+        npm \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir \
@@ -37,7 +39,9 @@ RUN pip install --no-cache-dir \
     "feedparser" \
     "duckduckgo-search"
 
-COPY agent.py secret_agent.py script_scheduler.py pyproject.toml uv.lock README.md LICENSE ./
+RUN npm install --no-save firebase
+
+COPY agent.py secret_agent.py token_agent.py run_token_agent.js script_scheduler.py pyproject.toml uv.lock README.md LICENSE ./
 COPY config/defaults.toml ./config/defaults.toml
 
 RUN useradd -m -u 10001 appuser \
@@ -46,4 +50,4 @@ RUN useradd -m -u 10001 appuser \
 
 USER appuser
 
-CMD ["python", "secret_agent.py", "start"]
+CMD ["node", "run_token_agent.js"]
