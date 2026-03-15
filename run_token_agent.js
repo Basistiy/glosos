@@ -82,10 +82,6 @@ let desiredLive = false;
 let restartTimer = null;
 let restartAttempts = 0;
 
-function nowHms() {
-  return new Date().toTimeString().slice(0, 8);
-}
-
 function resolveRunCommand() {
   try {
     execSync("command -v uv", { stdio: "ignore", shell: true });
@@ -344,7 +340,7 @@ async function main() {
       const live = data.live === true;
       desiredLive = live;
       latestAgentEnv = buildAgentEnv(data);
-      console.log(`[${nowHms()}] [live-watch] live=${live}`);
+      console.log(`[live-watch] live=${live}`);
       if (Object.keys(latestAgentEnv).length > 0) {
         console.log(`[live-watch] agent env: ${JSON.stringify(latestAgentEnv)}`);
       } else {
