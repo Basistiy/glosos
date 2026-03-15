@@ -76,6 +76,7 @@ const auth = getAuth(app);
 
 let lastLiveValue = null;
 let runningChild = null;
+let latestAgentEnv = {};
 
 function buildTokenRequestBody() {
   const data = {};
@@ -169,7 +170,7 @@ async function startAgentProcess() {
     cwd: projectRoot,
     stdio: "inherit",
     shell: true,
-    env: { ...process.env, LIVEKIT_TOKEN: livekitToken },
+    env: { ...process.env, ...latestAgentEnv, LIVEKIT_TOKEN: livekitToken },
   });
 
   runningChild.on("exit", (code, signal) => {
@@ -188,6 +189,47 @@ function stopAgentProcess(reason = "live set to false") {
 
   console.log(`[live-watch] stopping agent process: ${reason}`);
   runningChild.kill("SIGTERM");
+}
+
+function firstString(...values) {
+  for (const value of values) {
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) {
+        return trimmed;
+      }
+    }
+  }
+  return "";
+}
+
+function normalizeAgentGender(data) {
+  return firstString(data.agentGender).toLowerCase();
+}
+
+function normalizeAgentLanguage(data) {
+  return firstString(data.agentLanguage).toLowerCase();
+}
+
+function normalizeAgentName(data) {
+  return firstString(data.agentName);
+}
+
+function buildAgentEnv(data) {
+  const env = {};
+  const agentGender = normalizeAgentGender(data);
+  const agentLanguage = normalizeAgentLanguage(data);
+  const agentName = normalizeAgentName(data);
+  if (agentGender) {
+    env.AGENT_GENDER = agentGender;
+  }
+  if (agentLanguage) {
+    env.AGENT_LANGUAGE = agentLanguage;
+  }
+  if (agentName) {
+    env.AGENT_NAME = agentName;
+  }
+  return env;
 }
 
 console.log(
@@ -249,7 +291,13 @@ async function main() {
 
       const data = snapshot.data() || {};
       const live = data.live === true;
+      latestAgentEnv = buildAgentEnv(data);
       console.log(`[live-watch] live=${live}`);
+      if (Object.keys(latestAgentEnv).length > 0) {
+        console.log(`[live-watch] agent env: ${JSON.stringify(latestAgentEnv)}`);
+      } else {
+        console.log("[live-watch] agent env: none");
+      }
 
       if (live && lastLiveValue !== true) {
         startAgentProcess().catch((err) => {
