@@ -31,8 +31,7 @@ Configured pipeline in `agent.py`:
 - [`agent.py`](agent.py): shared agent implementation and runtime helpers
 - [`secret_agent.py`](secret_agent.py): LiveKit worker startup (API key/secret mode)
 - [`token_agent.py`](token_agent.py): token-based agent participant runtime
-- [`run_token_agent.py`](run_token_agent.py): helper that mints a local LiveKit token from API key/secret
-- [`run_token_agent_firebase.py`](run_token_agent_firebase.py): helper that signs in to Firebase (username/password) and fetches a LiveKit token from your backend
+- [`run_token_agent.js`](run_token_agent.js): Firebase-backed launcher that signs in with email/password, watches Firestore `user_settings/<uid>`, fetches a LiveKit token from backend, and runs `token_agent.py`
 - [`config/defaults.toml`](config/defaults.toml): committed non-secret runtime defaults
 - [`docker-compose.yml`](docker-compose.yml): runtime setup for the published container image
 - [`pyproject.toml`](pyproject.toml): project metadata and dependencies
@@ -51,7 +50,14 @@ Runtime settings such as `STT_MODEL`, `LLM_MODEL`, `TTS_MODEL`, `TTS_VOICE_NAME`
 `GOOGLE_LLM_LOCATION` is required.
 For Gemini 3 Flash on Vertex AI, set `GOOGLE_LLM_LOCATION=global`.
 
-Create a local `config/.env` file with secrets:
+Create a local `config/.env` file with secrets used by your chosen mode.
+
+Required for default Firebase launcher mode (`node run_token_agent.js`):
+- `FIREBASE_WEB_API_KEY`
+- `FIREBASE_AUTH_USERNAME` (or `FIREBASE_AUTH_EMAIL`)
+- `FIREBASE_AUTH_PASSWORD`
+
+Required for worker mode (`python secret_agent.py`):
 - `LIVEKIT_API_KEY`
 - `LIVEKIT_API_SECRET`
 
@@ -74,7 +80,9 @@ cp config/.env.example config/.env
 uv sync
 ```
 
-2. Set secret environment variables in `config/.env` (see `config/.env.example`), then start the agent:
+2. Set secret environment variables in `config/.env` (see `config/.env.example`), then start one mode:
+
+Worker mode (API key/secret):
 ```bash
 uv run python secret_agent.py
 ```
@@ -85,35 +93,18 @@ uv run python token_agent.py
 ```
 Requires a valid `LIVEKIT_URL` in `config/defaults.toml` and `LIVEKIT_TOKEN`.
 
-Token-only participant mode with auto-generated JWT from API key/secret:
+Token-only participant mode with Firebase username/password + backend token endpoint:
 ```bash
-uv run python run_token_agent.py
+node run_token_agent.js
 ```
-Requires `LIVEKIT_URL` in `config/defaults.toml`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET`.
-Optional token-generation env vars:
-- `LIVEKIT_ROOM` (default: `default-room`)
-- `LIVEKIT_IDENTITY` (default: `token-agent`)
-- `LIVEKIT_CLIENT_IDENTITY` (default: `human-test`)
-- `LIVEKIT_TOKEN_TTL_SECONDS` (default: `3600`)
-
-Token-only participant mode with Firebase username/password auth + backend token endpoint:
-```bash
-uv run python run_token_agent_firebase.py
-```
-Works with Firebase Callable (`onCall`) endpoints by default (`{"data": ...}` request / `{"result": ...}` response).
-
-Required non-secret config in `config/defaults.toml` (`[agent]`):
-- `FIREBASE_WEB_API_KEY`
-- `FIREBASE_LIVEKIT_TOKEN_URL`
-
 Required env vars:
+- `FIREBASE_WEB_API_KEY`
 - `FIREBASE_AUTH_USERNAME` (or `FIREBASE_AUTH_EMAIL`)
 - `FIREBASE_AUTH_PASSWORD`
 
-Optional env vars:
-- `FIREBASE_AGENT_NAME` (sent as `request.data.agentName` for callable functions)
-- `LIVEKIT_TARGET_UID` (defaults to the authenticated Firebase uid)
-- `FIREBASE_LIVEKIT_TOKEN_REQUEST_JSON` (raw JSON override for your token endpoint request body)
+Notes:
+- Firebase project metadata and token endpoint URL are currently hardcoded in `run_token_agent.js`.
+- `run_token_agent.js` signs in, resolves the user `uid`, subscribes to `user_settings/<uid>`, and starts/stops `token_agent.py` based on the `live` flag in that document.
 
 If you need available CLI options from LiveKit Agents:
 ```bash
@@ -166,7 +157,7 @@ bash scripts/setup.sh
 
 The script will:
 - create all required runtime files (`config/defaults.toml`, `config/.env`, `config/google-service-account.json`, `user/`, `docker-compose.glosos.yml`),
-- ask for `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET`,
+- ask for `FIREBASE_WEB_API_KEY`, `FIREBASE_AUTH_USERNAME`, and `FIREBASE_AUTH_PASSWORD`,
 - import Google service account JSON from a file path (you can drag and drop the JSON file into terminal to auto-fill the path),
 - pull `ghcr.io/basistiy/glosos:latest` (or `GLOSOS_IMAGE` if set),
 - optionally start `docker compose -f docker-compose.glosos.yml up -d` immediately.
@@ -180,7 +171,7 @@ Notes:
 - Python scripts placed in `user/system/scripts/` are discovered every 60 seconds and executed one by one in filename order.
 - Files starting with `.` or `_` are ignored.
 - Each script is run with the app's Python interpreter and has a 300 second timeout.
-- Container defaults to `python secret_agent.py start` (not `console`).
+- Container defaults to `node run_token_agent.js`.
 - `console` mode requires PortAudio and host audio device access, which is typically not available in Docker Desktop.
 
 ## Scheduled User Scripts
