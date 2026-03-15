@@ -103,6 +103,14 @@ USER_SYSTEM_INSTRUCTIONS_PATH = Path("user/system/instructions.md")
 DEFAULT_USER_SYSTEM_INSTRUCTIONS = """This file is loaded into the agent system instructions at startup.
 Keep the text concise and task-focused.
 """
+MALE_TTS_VOICE_NAME = "en-US-Chirp3-HD-Charon"
+FEMALE_TTS_VOICE_NAME = "en-US-Chirp3-HD-Kore"
+STT_LANGUAGE_BY_AGENT_LANGUAGE = {
+    "english": "en-US",
+    "russian": "ru-RU",
+    "polish": "pl-PL",
+    "spanish": "es-ES",
+}
 
 
 def _read_pyproject(pyproject_path: Path) -> tuple[str, str, str, int]:
@@ -244,14 +252,44 @@ def _build_google_llm() -> google.LLM:
     )
 
 
+def _resolved_tts_voice_name() -> str:
+    agent_gender = (os.getenv("AGENT_GENDER") or "").strip().lower()
+    if agent_gender == "male":
+        return MALE_TTS_VOICE_NAME
+    if agent_gender == "female":
+        return FEMALE_TTS_VOICE_NAME
+    return TTS_VOICE_NAME
+
+
+def _resolved_stt_language() -> str:
+    agent_language = (os.getenv("AGENT_LANGUAGE") or "").strip().lower()
+    return STT_LANGUAGE_BY_AGENT_LANGUAGE.get(agent_language, STT_LANGUAGE)
+
+
+def _resolved_agent_name() -> str:
+    return (os.getenv("AGENT_NAME") or "").strip()
+
+
+def _resolved_agent_gender() -> str:
+    return (os.getenv("AGENT_GENDER") or "").strip().lower()
+
+
+def _agent_identity_system_prompt() -> str:
+    agent_name = _resolved_agent_name() or "Assistant"
+    agent_gender = _resolved_agent_gender() or "unspecified"
+    return f"Your name is {agent_name}. Your gender is {agent_gender}."
+
+
 def build_agent_session() -> AgentSession:
     google_credentials_file = _google_credentials_file()
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = google_credentials_file
+    tts_voice_name = _resolved_tts_voice_name()
+    stt_language = _resolved_stt_language()
     return AgentSession(
         stt=google.STT(
             model=STT_MODEL,
             location=GOOGLE_STT_LOCATION,
-            languages=STT_LANGUAGE,
+            languages=stt_language,
             detect_language=False,
             spoken_punctuation=False,
             use_streaming=STT_USE_STREAMING,
@@ -260,7 +298,7 @@ def build_agent_session() -> AgentSession:
         llm=_build_google_llm(),
         tts=google.TTS(
             model_name=TTS_MODEL,
-            voice_name=TTS_VOICE_NAME,
+            voice_name=tts_voice_name,
             use_streaming=True,
             credentials_file=google_credentials_file,
         ),
@@ -351,8 +389,12 @@ class Assistant(Agent):
         self._video_stream: rtc.VideoStream | None = None
         self._video_tasks: set[asyncio.Task[None]] = set()
         user_system_instructions = _read_user_system_instructions(root)
+        identity_system_prompt = _agent_identity_system_prompt()
         super().__init__(
             instructions="""You are a helpful voice AI assistant.
+            """
+            + identity_system_prompt
+            + """
             You eagerly assist users with their questions by providing information from your extensive knowledge.
             Your responses are concise, to the point, and without any complex formatting or punctuation including emojis, asterisks, or other symbols.
             You can execute Python in your own project using the execute_python tool. Use python to read files, inspect the environment, perform calculations, making network requests.

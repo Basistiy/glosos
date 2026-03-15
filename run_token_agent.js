@@ -3,6 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
+const { execSync } = require("child_process");
 const { initializeApp } = require("@firebase/app");
 const { getAuth, signInWithEmailAndPassword } = require("@firebase/auth");
 const { getFirestore, doc, onSnapshot } = require("@firebase/firestore");
@@ -67,7 +68,7 @@ const firebaseConfig = {
 const collectionName = "user_settings";
 const tokenEndpointUrl = "https://getlivekittokenagent-wxo2praqea-uc.a.run.app";
 const firebaseAgentName = "";
-const runCommand = "python token_agent.py";
+const runCommand = resolveRunCommand();
 const projectRoot = path.resolve(__dirname);
 
 const app = initializeApp(firebaseConfig);
@@ -77,6 +78,15 @@ const auth = getAuth(app);
 let lastLiveValue = null;
 let runningChild = null;
 let latestAgentEnv = {};
+
+function resolveRunCommand() {
+  try {
+    execSync("command -v uv", { stdio: "ignore", shell: true });
+    return "uv run python token_agent.py";
+  } catch {
+    return "python token_agent.py";
+  }
+}
 
 function buildTokenRequestBody() {
   const data = {};
