@@ -175,6 +175,7 @@ class TokenAgentDaemon:
         self._stop_event = asyncio.Event()
 
         async def _runner() -> None:
+            unexpected_end = False
             try:
                 await _run_token_session(
                     livekit_token=token,
@@ -184,8 +185,17 @@ class TokenAgentDaemon:
                 )
             except Exception as exc:
                 print(f"[token-agent] session failed: {exc}")
+                unexpected_end = True
             finally:
                 print("[token-agent] session ended")
+                stop_requested = self._stop_event is not None and self._stop_event.is_set()
+                if not stop_requested:
+                    unexpected_end = True
+                if unexpected_end:
+                    print(
+                        "[token-agent] session ended unexpectedly; exiting daemon for supervisor restart"
+                    )
+                    os._exit(70)
 
         self._active_task = asyncio.create_task(_runner())
 
@@ -202,9 +212,10 @@ class TokenAgentDaemon:
         try:
             await asyncio.wait_for(self._active_task, timeout=15)
         except asyncio.TimeoutError:
-            print("[token-agent] stop timeout; cancelling active session")
-            self._active_task.cancel()
-            await asyncio.gather(self._active_task, return_exceptions=True)
+            if not self._active_task.done():
+                print("[token-agent] stop timeout; cancelling active session")
+                self._active_task.cancel()
+                await asyncio.gather(self._active_task, return_exceptions=True)
 
         self._active_task = None
         self._stop_event = None
