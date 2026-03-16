@@ -70,7 +70,6 @@ const tokenEndpointUrl = "https://getlivekittokenagent-wxo2praqea-uc.a.run.app";
 const restartOnCleanExit = optionalEnv("RESTART_ON_CLEAN_EXIT", "true").toLowerCase() === "true";
 const runCommand = resolveRunCommand();
 const projectRoot = path.resolve(__dirname);
-const appVersion = resolveAppVersion();
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
@@ -147,19 +146,6 @@ function resolveRunCommand() {
   } catch {
     return "python token_agent.py --daemon";
   }
-}
-
-function resolveAppVersion() {
-  const versionPath = path.resolve(__dirname, "VERSION");
-  try {
-    if (fs.existsSync(versionPath)) {
-      const value = fs.readFileSync(versionPath, "utf8").trim();
-      if (value) {
-        return value;
-      }
-    }
-  } catch {}
-  return "unknown";
 }
 
 function buildTokenRequestBody() {
@@ -410,7 +396,6 @@ function buildAgentEnv(data) {
 console.log(
   `[live-watch] firebase initialized for project=${firebaseConfig.projectId}`
 );
-console.log(`[live-watch] app version=${appVersion}`);
 
 let unsubscribe = null;
 

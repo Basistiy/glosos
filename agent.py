@@ -18,20 +18,6 @@ ROOT = Path(__file__).resolve().parent
 DEFAULTS_PATH = ROOT / "config" / "defaults.toml"
 
 
-def _resolve_app_version() -> str:
-    version_path = ROOT / "VERSION"
-    try:
-        value = version_path.read_text(encoding="utf-8").strip()
-        if value:
-            return value
-    except OSError:
-        pass
-    return "unknown"
-
-
-APP_VERSION = _resolve_app_version()
-
-
 def _now_hms() -> str:
     return datetime.now().strftime("%H:%M:%S")
 
@@ -187,7 +173,6 @@ def _build_project_context() -> str:
         "Project context for your own source code:",
         f"- root: {ROOT}",
         f"- project: {name} {version}",
-        f"- app-version: {APP_VERSION}",
         f"- requires-python: {requires_python}",
         f"- dependencies-in-pyproject: {dependency_count}",
         f"- models: stt={STT_MODEL}, llm={LLM_MODEL}, tts={TTS_MODEL}",
