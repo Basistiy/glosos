@@ -1,5 +1,6 @@
 import asyncio
 import os
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -15,6 +16,18 @@ from agent import (
     register_incoming_file_handler,
 )
 from sounds import emit_ready_sound
+
+
+def _now_hms() -> str:
+    return datetime.now().strftime("%H:%M:%S")
+
+
+_builtin_print = print
+
+
+def print(*args, **kwargs):  # type: ignore[no-redef]
+    _builtin_print(f"[{_now_hms()}]", *args, **kwargs)
+
 
 load_dotenv("config/.env")
 ATTRIBUTE_AGENT_STATE = "lk.agent.state"

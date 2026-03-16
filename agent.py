@@ -3,6 +3,7 @@ import platform
 import subprocess
 import sys
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from typing import Awaitable, Callable
 
@@ -15,6 +16,17 @@ from livekit.plugins import google, silero
 
 ROOT = Path(__file__).resolve().parent
 DEFAULTS_PATH = ROOT / "config" / "defaults.toml"
+
+
+def _now_hms() -> str:
+    return datetime.now().strftime("%H:%M:%S")
+
+
+_builtin_print = print
+
+
+def print(*args, **kwargs):  # type: ignore[no-redef]
+    _builtin_print(f"[{_now_hms()}]", *args, **kwargs)
 
 
 def _load_agent_defaults() -> dict[str, object]:
@@ -289,12 +301,13 @@ def build_agent_session() -> AgentSession:
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = google_credentials_file
     tts_voice_name = _resolved_tts_voice_name()
     stt_languages = _resolved_stt_languages()
+    detect_language = isinstance(stt_languages, list)
     return AgentSession(
         stt=google.STT(
             model=STT_MODEL,
             location=GOOGLE_STT_LOCATION,
             languages=stt_languages,
-            detect_language=False,
+            detect_language=detect_language,
             spoken_punctuation=False,
             use_streaming=STT_USE_STREAMING,
             credentials_file=google_credentials_file,

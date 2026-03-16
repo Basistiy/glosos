@@ -67,7 +67,7 @@ const firebaseConfig = {
 
 const collectionName = "user_settings";
 const tokenEndpointUrl = "https://getlivekittokenagent-wxo2praqea-uc.a.run.app";
-const firebaseAgentName = "";
+const restartOnCleanExit = optionalEnv("RESTART_ON_CLEAN_EXIT", "false").toLowerCase() === "true";
 const runCommand = resolveRunCommand();
 const projectRoot = path.resolve(__dirname);
 
@@ -81,6 +81,59 @@ let latestAgentEnv = {};
 let desiredLive = false;
 let restartTimer = null;
 let restartAttempts = 0;
+let startRequestSeq = 0;
+let childStartedAtMs = 0;
+const UPTIME_RESET_MS = 15000;
+const MIN_CLEAN_RESTART_DELAY_MS = 3000;
+const MAX_RESTART_DELAY_MS = 30000;
+
+function nowHms() {
+  return new Date().toTimeString().slice(0, 8);
+}
+
+function installConsoleTimestampPrefix() {
+  const originalLog = console.log.bind(console);
+  const originalWarn = console.warn.bind(console);
+  const originalError = console.error.bind(console);
+
+  console.log = (...args) => originalLog(`[${nowHms()}]`, ...args);
+  console.warn = (...args) => originalWarn(`[${nowHms()}]`, ...args);
+  console.error = (...args) => originalError(`[${nowHms()}]`, ...args);
+}
+
+function pipeWithTimestampPrefix(readable, writable) {
+  if (!readable) {
+    return;
+  }
+
+  let buffer = "";
+  readable.setEncoding("utf8");
+  readable.on("data", (chunk) => {
+    buffer += chunk;
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() || "";
+    for (const line of lines) {
+      if (/^\[\d{2}:\d{2}:\d{2}\]/.test(line)) {
+        writable.write(`${line}\n`);
+      } else {
+        writable.write(`[${nowHms()}] ${line}\n`);
+      }
+    }
+  });
+  readable.on("end", () => {
+    if (!buffer) {
+      return;
+    }
+    if (/^\[\d{2}:\d{2}:\d{2}\]/.test(buffer)) {
+      writable.write(`${buffer}\n`);
+    } else {
+      writable.write(`[${nowHms()}] ${buffer}\n`);
+    }
+    buffer = "";
+  });
+}
+
+installConsoleTimestampPrefix();
 
 function resolveRunCommand() {
   try {
@@ -92,11 +145,7 @@ function resolveRunCommand() {
 }
 
 function buildTokenRequestBody() {
-  const data = {};
-  if (firebaseAgentName) {
-    data.agentName = firebaseAgentName;
-  }
-  return { data };
+  return { data: {} };
 }
 
 function extractLivekitToken(response) {
@@ -172,6 +221,7 @@ async function fetchLivekitToken() {
 }
 
 async function startAgentProcess() {
+  const requestSeq = ++startRequestSeq;
   if (!desiredLive) {
     console.log("[live-watch] desiredLive=false, skip start");
     return;
@@ -188,17 +238,34 @@ async function startAgentProcess() {
   }
 
   const livekitToken = await fetchLivekitToken();
+  if (!desiredLive) {
+    console.log("[live-watch] live flipped false while fetching token, abort start");
+    return;
+  }
+  if (requestSeq !== startRequestSeq) {
+    console.log("[live-watch] newer start/stop event superseded this start request");
+    return;
+  }
+  if (runningChild && !runningChild.killed) {
+    console.log("[live-watch] agent process started by another request, skip start");
+    return;
+  }
+
   console.log(`[live-watch] starting agent: ${runCommand}`);
+  childStartedAtMs = Date.now();
   runningChild = spawn(runCommand, {
     cwd: projectRoot,
-    stdio: "inherit",
+    stdio: ["ignore", "pipe", "pipe"],
     shell: true,
     env: { ...process.env, ...latestAgentEnv, LIVEKIT_TOKEN: livekitToken },
   });
+  pipeWithTimestampPrefix(runningChild.stdout, process.stdout);
+  pipeWithTimestampPrefix(runningChild.stderr, process.stderr);
 
   runningChild.on("exit", (code, signal) => {
+    const uptimeMs = Math.max(0, Date.now() - childStartedAtMs);
     console.log(
-      `[live-watch] agent process exited code=${code ?? "null"} signal=${signal ?? "null"}`
+      `[live-watch] agent process exited code=${code ?? "null"} signal=${signal ?? "null"} uptimeMs=${uptimeMs}`
     );
     runningChild = null;
     if (!desiredLive) {
@@ -206,8 +273,25 @@ async function startAgentProcess() {
       return;
     }
 
+    if (uptimeMs >= UPTIME_RESET_MS) {
+      restartAttempts = 0;
+    }
     restartAttempts += 1;
-    const delayMs = Math.min(10000, 500 * Math.pow(2, restartAttempts - 1));
+    const exponentialDelayMs = Math.min(
+      MAX_RESTART_DELAY_MS,
+      500 * Math.pow(2, restartAttempts - 1)
+    );
+    const isCleanExit = code === 0 || signal === "SIGINT";
+    if (isCleanExit && !restartOnCleanExit) {
+      console.log(
+        "[live-watch] clean exit detected; auto-restart disabled (set RESTART_ON_CLEAN_EXIT=true to enable)"
+      );
+      restartAttempts = 0;
+      return;
+    }
+    const delayMs = isCleanExit
+      ? Math.max(MIN_CLEAN_RESTART_DELAY_MS, exponentialDelayMs)
+      : exponentialDelayMs;
     console.log(
       `[live-watch] scheduling restart in ${delayMs}ms (attempt ${restartAttempts})`
     );
@@ -218,12 +302,12 @@ async function startAgentProcess() {
       });
     }, delayMs);
   });
-
-  restartAttempts = 0;
 }
 
 function stopAgentProcess(reason = "live set to false") {
   desiredLive = false;
+  // Invalidate any in-flight async start request.
+  startRequestSeq += 1;
   if (restartTimer) {
     clearTimeout(restartTimer);
     restartTimer = null;
@@ -235,7 +319,7 @@ function stopAgentProcess(reason = "live set to false") {
   }
 
   console.log(`[live-watch] stopping agent process: ${reason}`);
-  runningChild.kill("SIGTERM");
+  runningChild.kill("SIGINT");
 }
 
 function firstString(...values) {
@@ -292,7 +376,7 @@ function cleanupAndExit(signal) {
   }
 
   if (runningChild && !runningChild.killed) {
-    runningChild.kill("SIGTERM");
+    runningChild.kill("SIGINT");
   }
 
   process.exit(0);
