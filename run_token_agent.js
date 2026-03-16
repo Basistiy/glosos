@@ -87,9 +87,15 @@ let settingsDocId = "";
 let resubscribeTimer = null;
 let resubscribeAttempts = 0;
 let isSubscribing = false;
+let lastSnapshotAtMs = Date.now();
+let snapshotWatchdogTimer = null;
 const UPTIME_RESET_MS = 15000;
 const MIN_CLEAN_RESTART_DELAY_MS = 3000;
 const MAX_RESTART_DELAY_MS = 30000;
+const SNAPSHOT_STALE_MS = Math.max(
+  60000,
+  Number(optionalEnv("FIREBASE_SNAPSHOT_STALE_MS", "180000")) || 180000
+);
 
 function nowHms() {
   return new Date().toTimeString().slice(0, 8);
@@ -417,10 +423,30 @@ function scheduleSettingsResubscribe(reason = "snapshot error") {
   }, delayMs);
 }
 
+function startSnapshotWatchdog() {
+  if (snapshotWatchdogTimer) {
+    return;
+  }
+  snapshotWatchdogTimer = setInterval(() => {
+    const ageMs = Date.now() - lastSnapshotAtMs;
+    if (ageMs < SNAPSHOT_STALE_MS) {
+      return;
+    }
+    if (resubscribeTimer || isSubscribing) {
+      return;
+    }
+    scheduleSettingsResubscribe(`snapshot stale for ${ageMs}ms`);
+  }, 30000);
+}
+
 function cleanupAndExit(signal) {
   console.log(`[live-watch] received ${signal}, shutting down`);
   if (typeof unsubscribe === "function") {
     unsubscribe();
+  }
+  if (snapshotWatchdogTimer) {
+    clearInterval(snapshotWatchdogTimer);
+    snapshotWatchdogTimer = null;
   }
 
   if (runningChild && !runningChild.killed) {
@@ -468,6 +494,7 @@ async function subscribeToSettings(docIdHint = "") {
     const docId = docIdHint || (await resolveDocId());
     settingsDocId = docId;
     const settingsRef = doc(db, collectionName, docId);
+    lastSnapshotAtMs = Date.now();
     console.log(
       `[live-watch] listening to ${collectionName}/${docId} in project=${firebaseConfig.projectId}`
     );
@@ -475,6 +502,7 @@ async function subscribeToSettings(docIdHint = "") {
     unsubscribe = onSnapshot(
     settingsRef,
     (snapshot) => {
+      lastSnapshotAtMs = Date.now();
       if (!snapshot.exists()) {
         console.warn("[live-watch] user_settings doc does not exist");
         return;
@@ -532,6 +560,7 @@ async function main() {
   settingsDocId = await resolveDocId();
   await ensureAgentProcessRunning();
   await subscribeToSettings(settingsDocId);
+  startSnapshotWatchdog();
 }
 
 main().catch((err) => {
