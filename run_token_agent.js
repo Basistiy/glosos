@@ -83,6 +83,10 @@ let restartTimer = null;
 let restartAttempts = 0;
 let startRequestSeq = 0;
 let childStartedAtMs = 0;
+let settingsDocId = "";
+let resubscribeTimer = null;
+let resubscribeAttempts = 0;
+let isSubscribing = false;
 const UPTIME_RESET_MS = 15000;
 const MIN_CLEAN_RESTART_DELAY_MS = 3000;
 const MAX_RESTART_DELAY_MS = 30000;
@@ -395,6 +399,24 @@ console.log(
 
 let unsubscribe = null;
 
+function scheduleSettingsResubscribe(reason = "snapshot error") {
+  if (resubscribeTimer) {
+    return;
+  }
+  resubscribeAttempts += 1;
+  const delayMs = Math.min(30000, 500 * Math.pow(2, resubscribeAttempts - 1));
+  console.warn(
+    `[live-watch] scheduling Firestore resubscribe in ${delayMs}ms (attempt ${resubscribeAttempts}): ${reason}`
+  );
+  resubscribeTimer = setTimeout(() => {
+    resubscribeTimer = null;
+    subscribeToSettings(settingsDocId).catch((err) => {
+      console.error("[live-watch] resubscribe failed:", err);
+      scheduleSettingsResubscribe("resubscribe failed");
+    });
+  }, delayMs);
+}
+
 function cleanupAndExit(signal) {
   console.log(`[live-watch] received ${signal}, shutting down`);
   if (typeof unsubscribe === "function") {
@@ -432,15 +454,25 @@ async function resolveDocId() {
   return uid;
 }
 
-async function main() {
-  const docId = await resolveDocId();
-  const settingsRef = doc(db, collectionName, docId);
-  console.log(
-    `[live-watch] listening to ${collectionName}/${docId} in project=${firebaseConfig.projectId}`
-  );
-  await ensureAgentProcessRunning();
+async function subscribeToSettings(docIdHint = "") {
+  if (isSubscribing) {
+    return;
+  }
+  isSubscribing = true;
+  try {
+    if (typeof unsubscribe === "function") {
+      unsubscribe();
+      unsubscribe = null;
+    }
 
-  unsubscribe = onSnapshot(
+    const docId = docIdHint || (await resolveDocId());
+    settingsDocId = docId;
+    const settingsRef = doc(db, collectionName, docId);
+    console.log(
+      `[live-watch] listening to ${collectionName}/${docId} in project=${firebaseConfig.projectId}`
+    );
+
+    unsubscribe = onSnapshot(
     settingsRef,
     (snapshot) => {
       if (!snapshot.exists()) {
@@ -477,8 +509,29 @@ async function main() {
     },
     (err) => {
       console.error("[live-watch] snapshot error:", err);
+      const code = String((err && err.code) || "").toLowerCase();
+      if (code.includes("unauthenticated") || String(err).includes("UNAUTHENTICATED")) {
+        auth
+          .signOut()
+          .catch(() => {})
+          .finally(() => {
+            scheduleSettingsResubscribe("unauthenticated; re-auth required");
+          });
+        return;
+      }
+      scheduleSettingsResubscribe("snapshot stream error");
     }
   );
+    resubscribeAttempts = 0;
+  } finally {
+    isSubscribing = false;
+  }
+}
+
+async function main() {
+  settingsDocId = await resolveDocId();
+  await ensureAgentProcessRunning();
+  await subscribeToSettings(settingsDocId);
 }
 
 main().catch((err) => {

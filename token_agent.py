@@ -116,47 +116,69 @@ async def _run_token_session(
         )
         return info.stream_id
 
-    await room.connect(LIVEKIT_URL, livekit_token)
-    print(f"[token-agent] connected to room: {room.name}")
-    if linked_identity:
-        print(f"[token-agent] room input participant_identity={linked_identity}")
-    _schedule_state_publish("initializing")
+    try:
+        if stop_event is not None and stop_event.is_set():
+            print("[token-agent] start cancelled before room.connect (stop already requested)")
+            return
 
-    room_options = room_io.RoomOptions(
-        audio_input=room_io.AudioInputOptions(pre_connect_audio=False),
-    )
-    if linked_identity:
-        room_options.participant_identity = linked_identity
+        await room.connect(LIVEKIT_URL, livekit_token)
+        print(f"[token-agent] connected to room: {room.name}")
+        if linked_identity:
+            print(f"[token-agent] room input participant_identity={linked_identity}")
+        _schedule_state_publish("initializing")
 
-    await session.start(
-        room=room,
-        agent=Assistant(project_context=project_context, send_file_fn=_send_file, room=room),
-        room_options=room_options,
-    )
-    _schedule_state_publish("listening")
-    await emit_ready_sound(room)
+        if stop_event is not None and stop_event.is_set():
+            print("[token-agent] stop requested right after connect, disconnecting room")
+            await room.disconnect()
+            await disconnected.wait()
+            return
 
-    if stop_event is None:
-        await disconnected.wait()
-    else:
-        stop_wait = asyncio.create_task(stop_event.wait())
-        disconnect_wait = asyncio.create_task(disconnected.wait())
-        done, pending = await asyncio.wait(
-            {stop_wait, disconnect_wait},
-            return_when=asyncio.FIRST_COMPLETED,
+        room_options = room_io.RoomOptions(
+            audio_input=room_io.AudioInputOptions(pre_connect_audio=False),
         )
-        for task in pending:
+        if linked_identity:
+            room_options.participant_identity = linked_identity
+
+        await session.start(
+            room=room,
+            agent=Assistant(project_context=project_context, send_file_fn=_send_file, room=room),
+            room_options=room_options,
+        )
+        _schedule_state_publish("listening")
+        await emit_ready_sound(room)
+
+        if stop_event is None:
+            await disconnected.wait()
+        else:
+            stop_wait = asyncio.create_task(stop_event.wait())
+            disconnect_wait = asyncio.create_task(disconnected.wait())
+            done, pending = await asyncio.wait(
+                {stop_wait, disconnect_wait},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+            if stop_wait in done and not disconnected.is_set():
+                print("[token-agent] stop requested, disconnecting room")
+                try:
+                    await room.disconnect()
+                except Exception as exc:
+                    print(f"[token-agent] room.disconnect failed: {exc}")
+                await disconnected.wait()
+    finally:
+        for task in list(state_publish_tasks):
             task.cancel()
-        if stop_wait in done and not disconnected.is_set():
-            print("[token-agent] stop requested, disconnecting room")
+        close_session = getattr(session, "aclose", None)
+        if callable(close_session):
+            try:
+                await close_session()
+            except Exception as exc:
+                print(f"[token-agent] session close failed: {exc}")
+        if not disconnected.is_set():
             try:
                 await room.disconnect()
-            except Exception as exc:
-                print(f"[token-agent] room.disconnect failed: {exc}")
-            await disconnected.wait()
-
-    for task in list(state_publish_tasks):
-        task.cancel()
+            except Exception:
+                pass
 
 
 class TokenAgentDaemon:
