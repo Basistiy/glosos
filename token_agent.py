@@ -9,6 +9,7 @@ from typing import Any
 from dotenv import load_dotenv
 from livekit import rtc
 from livekit.agents.voice import room_io
+from livekit.plugins import noise_cancellation
 
 from agent import (
     Assistant,
@@ -134,7 +135,10 @@ async def _run_token_session(
             return
 
         room_options = room_io.RoomOptions(
-            audio_input=room_io.AudioInputOptions(pre_connect_audio=False),
+            audio_input=room_io.AudioInputOptions(
+                pre_connect_audio=True,
+                noise_cancellation=noise_cancellation.BVC(),
+            ),
         )
         if linked_identity:
             room_options.participant_identity = linked_identity
