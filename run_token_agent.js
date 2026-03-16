@@ -67,7 +67,7 @@ const firebaseConfig = {
 
 const collectionName = "user_settings";
 const tokenEndpointUrl = "https://getlivekittokenagent-wxo2praqea-uc.a.run.app";
-const restartOnCleanExit = optionalEnv("RESTART_ON_CLEAN_EXIT", "false").toLowerCase() === "true";
+const restartOnCleanExit = optionalEnv("RESTART_ON_CLEAN_EXIT", "true").toLowerCase() === "true";
 const runCommand = resolveRunCommand();
 const projectRoot = path.resolve(__dirname);
 
@@ -138,9 +138,9 @@ installConsoleTimestampPrefix();
 function resolveRunCommand() {
   try {
     execSync("command -v uv", { stdio: "ignore", shell: true });
-    return "uv run python token_agent.py";
+    return "uv run python token_agent.py --daemon";
   } catch {
-    return "python token_agent.py";
+    return "python token_agent.py --daemon";
   }
 }
 
@@ -220,15 +220,21 @@ async function fetchLivekitToken() {
   return extractLivekitToken(parsed);
 }
 
-async function startAgentProcess() {
-  const requestSeq = ++startRequestSeq;
-  if (!desiredLive) {
-    console.log("[live-watch] desiredLive=false, skip start");
-    return;
+function sendAgentCommand(command) {
+  if (!runningChild || runningChild.killed || !runningChild.stdin) {
+    return false;
   }
+  try {
+    runningChild.stdin.write(`${JSON.stringify(command)}\n`);
+    return true;
+  } catch (err) {
+    console.error("[live-watch] failed to write command to token daemon:", err);
+    return false;
+  }
+}
 
+async function ensureAgentProcessRunning() {
   if (runningChild && !runningChild.killed) {
-    console.log("[live-watch] agent process already running, skip start");
     return;
   }
 
@@ -237,27 +243,13 @@ async function startAgentProcess() {
     restartTimer = null;
   }
 
-  const livekitToken = await fetchLivekitToken();
-  if (!desiredLive) {
-    console.log("[live-watch] live flipped false while fetching token, abort start");
-    return;
-  }
-  if (requestSeq !== startRequestSeq) {
-    console.log("[live-watch] newer start/stop event superseded this start request");
-    return;
-  }
-  if (runningChild && !runningChild.killed) {
-    console.log("[live-watch] agent process started by another request, skip start");
-    return;
-  }
-
-  console.log(`[live-watch] starting agent: ${runCommand}`);
+  console.log(`[live-watch] starting token daemon: ${runCommand}`);
   childStartedAtMs = Date.now();
   runningChild = spawn(runCommand, {
     cwd: projectRoot,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["pipe", "pipe", "pipe"],
     shell: true,
-    env: { ...process.env, ...latestAgentEnv, LIVEKIT_TOKEN: livekitToken },
+    env: { ...process.env },
   });
   pipeWithTimestampPrefix(runningChild.stdout, process.stdout);
   pipeWithTimestampPrefix(runningChild.stderr, process.stderr);
@@ -265,13 +257,9 @@ async function startAgentProcess() {
   runningChild.on("exit", (code, signal) => {
     const uptimeMs = Math.max(0, Date.now() - childStartedAtMs);
     console.log(
-      `[live-watch] agent process exited code=${code ?? "null"} signal=${signal ?? "null"} uptimeMs=${uptimeMs}`
+      `[live-watch] token daemon exited code=${code ?? "null"} signal=${signal ?? "null"} uptimeMs=${uptimeMs}`
     );
     runningChild = null;
-    if (!desiredLive) {
-      restartAttempts = 0;
-      return;
-    }
 
     if (uptimeMs >= UPTIME_RESET_MS) {
       restartAttempts = 0;
@@ -284,7 +272,7 @@ async function startAgentProcess() {
     const isCleanExit = code === 0 || signal === "SIGINT";
     if (isCleanExit && !restartOnCleanExit) {
       console.log(
-        "[live-watch] clean exit detected; auto-restart disabled (set RESTART_ON_CLEAN_EXIT=true to enable)"
+        "[live-watch] clean daemon exit; restart disabled (set RESTART_ON_CLEAN_EXIT=true to enable)"
       );
       restartAttempts = 0;
       return;
@@ -293,18 +281,52 @@ async function startAgentProcess() {
       ? Math.max(MIN_CLEAN_RESTART_DELAY_MS, exponentialDelayMs)
       : exponentialDelayMs;
     console.log(
-      `[live-watch] scheduling restart in ${delayMs}ms (attempt ${restartAttempts})`
+      `[live-watch] scheduling daemon restart in ${delayMs}ms (attempt ${restartAttempts})`
     );
     restartTimer = setTimeout(() => {
       restartTimer = null;
-      startAgentProcess().catch((err) => {
-        console.error("[live-watch] failed to restart agent:", err);
+      const action = desiredLive ? startAgentSession : ensureAgentProcessRunning;
+      action().catch((err) => {
+        console.error("[live-watch] failed to restart token daemon:", err);
       });
     }, delayMs);
   });
 }
 
-function stopAgentProcess(reason = "live set to false") {
+async function startAgentSession() {
+  const requestSeq = ++startRequestSeq;
+  if (!desiredLive) {
+    console.log("[live-watch] desiredLive=false, skip start");
+    return;
+  }
+
+  await ensureAgentProcessRunning();
+
+  const livekitToken = await fetchLivekitToken();
+  if (!desiredLive) {
+    console.log("[live-watch] live flipped false while fetching token, abort start");
+    return;
+  }
+  if (requestSeq !== startRequestSeq) {
+    console.log("[live-watch] newer start/stop event superseded this start request");
+    return;
+  }
+
+  const linkedIdentity = optionalEnv("LIVEKIT_CLIENT_IDENTITY");
+  const sent = sendAgentCommand({
+    cmd: "start",
+    token: livekitToken,
+    linked_identity: linkedIdentity,
+    agent_env: latestAgentEnv,
+  });
+  if (!sent) {
+    throw new Error("Token daemon is not available to receive start command.");
+  }
+  restartAttempts = 0;
+  console.log("[live-watch] start command sent to token daemon");
+}
+
+async function stopAgentSession(reason = "live set to false") {
   desiredLive = false;
   // Invalidate any in-flight async start request.
   startRequestSeq += 1;
@@ -314,12 +336,16 @@ function stopAgentProcess(reason = "live set to false") {
   }
 
   if (!runningChild || runningChild.killed) {
-    console.log("[live-watch] no running agent process to stop");
+    console.log("[live-watch] token daemon is not running; nothing to stop");
     return;
   }
 
-  console.log(`[live-watch] stopping agent process: ${reason}`);
-  runningChild.kill("SIGINT");
+  const sent = sendAgentCommand({ cmd: "stop", reason });
+  if (sent) {
+    console.log(`[live-watch] stop command sent: ${reason}`);
+  } else {
+    console.log("[live-watch] failed to send stop command");
+  }
 }
 
 function firstString(...values) {
@@ -376,6 +402,7 @@ function cleanupAndExit(signal) {
   }
 
   if (runningChild && !runningChild.killed) {
+    sendAgentCommand({ cmd: "shutdown" });
     runningChild.kill("SIGINT");
   }
 
@@ -411,6 +438,7 @@ async function main() {
   console.log(
     `[live-watch] listening to ${collectionName}/${docId} in project=${firebaseConfig.projectId}`
   );
+  await ensureAgentProcessRunning();
 
   unsubscribe = onSnapshot(
     settingsRef,
@@ -432,15 +460,17 @@ async function main() {
       }
 
       if (live && lastLiveValue !== true) {
-        startAgentProcess().catch((err) => {
+        startAgentSession().catch((err) => {
           console.error("[live-watch] failed to start agent:", err);
         });
-      } else if (live && !runningChild && !restartTimer) {
-        startAgentProcess().catch((err) => {
+      } else if (live && !restartTimer) {
+        startAgentSession().catch((err) => {
           console.error("[live-watch] failed to ensure running agent:", err);
         });
       } else if (!live && lastLiveValue === true) {
-        stopAgentProcess("live changed true -> false");
+        stopAgentSession("live changed true -> false").catch((err) => {
+          console.error("[live-watch] failed to stop agent:", err);
+        });
       }
 
       lastLiveValue = live;

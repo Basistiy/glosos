@@ -1,7 +1,10 @@
 import asyncio
+import json
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 from livekit import rtc
@@ -15,7 +18,12 @@ from agent import (
     build_agent_session,
     register_incoming_file_handler,
 )
-from sounds import emit_ready_sound
+
+try:
+    from sounds import emit_ready_sound
+except ModuleNotFoundError:
+    async def emit_ready_sound(_room: rtc.Room) -> None:
+        return None
 
 
 def _now_hms() -> str:
@@ -44,10 +52,24 @@ def _optional_env(name: str) -> str:
     return (os.getenv(name) or "").strip()
 
 
-async def run_token_agent() -> None:
-    livekit_token = _required_env("LIVEKIT_TOKEN")
-    linked_identity = _optional_env("LIVEKIT_CLIENT_IDENTITY")
+def _apply_agent_env(agent_env: dict[str, Any] | None) -> None:
+    for key in ("AGENT_GENDER", "AGENT_LANGUAGE", "AGENT_NAME"):
+        if agent_env and isinstance(agent_env.get(key), str):
+            value = agent_env[key].strip()
+            if value:
+                os.environ[key] = value
+                continue
+        os.environ.pop(key, None)
 
+
+async def _run_token_session(
+    *,
+    livekit_token: str,
+    linked_identity: str,
+    agent_env: dict[str, Any] | None,
+    stop_event: asyncio.Event | None,
+) -> None:
+    _apply_agent_env(agent_env)
     project_context = _build_project_context()
 
     room = rtc.Room()
@@ -85,7 +107,7 @@ async def run_token_agent() -> None:
         print(f"[token-agent] state: {old_state} -> {new_state}")
         if isinstance(new_state, str) and new_state:
             _schedule_state_publish(new_state)
-    
+
     async def _send_file(path: Path, topic: str, destination_identities: list[str]) -> str:
         info = await room.local_participant.send_file(
             str(path),
@@ -114,13 +136,140 @@ async def run_token_agent() -> None:
     _schedule_state_publish("listening")
     await emit_ready_sound(room)
 
-    await disconnected.wait()
+    if stop_event is None:
+        await disconnected.wait()
+    else:
+        stop_wait = asyncio.create_task(stop_event.wait())
+        disconnect_wait = asyncio.create_task(disconnected.wait())
+        done, pending = await asyncio.wait(
+            {stop_wait, disconnect_wait},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+        if stop_wait in done and not disconnected.is_set():
+            print("[token-agent] stop requested, disconnecting room")
+            try:
+                await room.disconnect()
+            except Exception as exc:
+                print(f"[token-agent] room.disconnect failed: {exc}")
+            await disconnected.wait()
+
+    for task in list(state_publish_tasks):
+        task.cancel()
+
+
+class TokenAgentDaemon:
+    def __init__(self) -> None:
+        self._active_task: asyncio.Task[None] | None = None
+        self._stop_event: asyncio.Event | None = None
+
+    def _running(self) -> bool:
+        return self._active_task is not None and not self._active_task.done()
+
+    async def start(self, token: str, linked_identity: str, agent_env: dict[str, Any] | None) -> None:
+        if self._running():
+            print("[token-agent] start ignored: session already running")
+            return
+
+        self._stop_event = asyncio.Event()
+
+        async def _runner() -> None:
+            try:
+                await _run_token_session(
+                    livekit_token=token,
+                    linked_identity=linked_identity,
+                    agent_env=agent_env,
+                    stop_event=self._stop_event,
+                )
+            except Exception as exc:
+                print(f"[token-agent] session failed: {exc}")
+            finally:
+                print("[token-agent] session ended")
+
+        self._active_task = asyncio.create_task(_runner())
+
+    async def stop(self, reason: str = "requested") -> None:
+        if not self._running():
+            print("[token-agent] stop ignored: no active session")
+            return
+
+        print(f"[token-agent] stop requested: {reason}")
+        assert self._stop_event is not None
+        self._stop_event.set()
+
+        assert self._active_task is not None
+        try:
+            await asyncio.wait_for(self._active_task, timeout=15)
+        except asyncio.TimeoutError:
+            print("[token-agent] stop timeout; cancelling active session")
+            self._active_task.cancel()
+            await asyncio.gather(self._active_task, return_exceptions=True)
+
+        self._active_task = None
+        self._stop_event = None
+
+
+async def run_daemon() -> None:
+    daemon = TokenAgentDaemon()
+    print("[token-agent] daemon ready")
+
+    while True:
+        line = await asyncio.to_thread(sys.stdin.readline)
+        if line == "":
+            await daemon.stop("stdin closed")
+            print("[token-agent] stdin closed; daemon exiting")
+            return
+
+        payload_raw = line.strip()
+        if not payload_raw:
+            continue
+
+        try:
+            payload = json.loads(payload_raw)
+        except json.JSONDecodeError as exc:
+            print(f"[token-agent] invalid command JSON: {exc}")
+            continue
+
+        cmd = str(payload.get("cmd", "")).strip().lower()
+        if cmd == "start":
+            token = str(payload.get("token", "")).strip()
+            if not token:
+                print("[token-agent] start ignored: missing token")
+                continue
+            linked_identity = str(payload.get("linked_identity", "")).strip()
+            agent_env_raw = payload.get("agent_env")
+            agent_env = agent_env_raw if isinstance(agent_env_raw, dict) else None
+            await daemon.start(token, linked_identity, agent_env)
+        elif cmd == "stop":
+            reason = str(payload.get("reason", "requested")).strip() or "requested"
+            await daemon.stop(reason)
+        elif cmd == "shutdown":
+            await daemon.stop("shutdown")
+            print("[token-agent] shutdown command received")
+            return
+        else:
+            print(f"[token-agent] unknown command: {cmd}")
+
+
+async def run_once_mode() -> None:
+    livekit_token = _required_env("LIVEKIT_TOKEN")
+    linked_identity = _optional_env("LIVEKIT_CLIENT_IDENTITY")
+    await _run_token_session(
+        livekit_token=livekit_token,
+        linked_identity=linked_identity,
+        agent_env=None,
+        stop_event=None,
+    )
 
 
 def main() -> None:
     _print_project_inspection()
     try:
-        asyncio.run(run_token_agent())
+        if "--daemon" in sys.argv:
+            asyncio.run(run_daemon())
+        else:
+            asyncio.run(run_once_mode())
     except KeyboardInterrupt:
         print("[token-agent] stopped by user")
 
