@@ -168,10 +168,13 @@ def _build_project_context() -> str:
     missing_files = [file_name for file_name in key_files if not (ROOT / file_name).exists()]
     user_root = ROOT / "user"
     user_files = _list_user_files(user_root)
+    now_local = datetime.now().astimezone()
 
     context_lines = [
         "Project context for your own source code:",
         f"- root: {ROOT}",
+        f"- startup-date-local: {now_local.date().isoformat()}",
+        f"- startup-weekday-local: {now_local.strftime('%A')}",
         f"- project: {name} {version}",
         f"- requires-python: {requires_python}",
         f"- dependencies-in-pyproject: {dependency_count}",
