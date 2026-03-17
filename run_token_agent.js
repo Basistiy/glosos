@@ -89,6 +89,7 @@ let resubscribeAttempts = 0;
 let isSubscribing = false;
 let lastSubscribeAtMs = Date.now();
 let snapshotWatchdogTimer = null;
+let deferredResubscribeReason = "";
 const UPTIME_RESET_MS = 15000;
 const MIN_CLEAN_RESTART_DELAY_MS = 3000;
 const MAX_RESTART_DELAY_MS = 30000;
@@ -154,10 +155,6 @@ function resolveRunCommand() {
   }
 }
 
-function buildTokenRequestBody() {
-  return { data: {} };
-}
-
 function extractLivekitToken(response) {
   const candidateObjects = [];
   if (response && typeof response === "object") {
@@ -181,27 +178,37 @@ function extractLivekitToken(response) {
   );
 }
 
-async function fetchLivekitToken() {
+async function ensureSignedInUser() {
   let user = auth.currentUser;
-  if (!user) {
-    const login =
-      optionalEnv("FIREBASE_AUTH_USERNAME") || optionalEnv("FIREBASE_AUTH_EMAIL");
-    const password = requiredEnv("FIREBASE_AUTH_PASSWORD");
-    if (!login) {
-      throw new Error(
-        "Missing FIREBASE_AUTH_USERNAME (or FIREBASE_AUTH_EMAIL) in config/.env."
-      );
-    }
-    const credential = await signInWithEmailAndPassword(auth, login, password);
-    user = credential.user;
+  if (user) {
+    return user;
   }
 
+  const login =
+    optionalEnv("FIREBASE_AUTH_USERNAME") || optionalEnv("FIREBASE_AUTH_EMAIL");
+  const password = requiredEnv("FIREBASE_AUTH_PASSWORD");
+  if (!login) {
+    throw new Error(
+      "Missing FIREBASE_AUTH_USERNAME (or FIREBASE_AUTH_EMAIL) in config/.env."
+    );
+  }
+
+  const credential = await signInWithEmailAndPassword(auth, login, password);
+  user = credential.user;
+  if (!user) {
+    throw new Error("Firebase sign-in succeeded but no user was returned.");
+  }
+  return user;
+}
+
+async function fetchLivekitToken() {
+  const user = await ensureSignedInUser();
   const idToken = await user.getIdToken();
   if (!idToken) {
     throw new Error("Firebase sign-in succeeded without idToken.");
   }
 
-  const payload = buildTokenRequestBody();
+  const payload = { data: {} };
   const response = await fetch(tokenEndpointUrl, {
     method: "POST",
     headers: {
@@ -370,23 +377,16 @@ function firstString(...values) {
   return "";
 }
 
-function normalizeAgentGender(data) {
-  return firstString(data.agentGender).toLowerCase();
-}
-
-function normalizeAgentLanguage(data) {
-  return firstString(data.agentLanguage).toLowerCase();
-}
-
-function normalizeAgentName(data) {
-  return firstString(data.agentName);
+function normalizedField(data, key, { lowercase = false } = {}) {
+  const value = firstString(data?.[key]);
+  return lowercase ? value.toLowerCase() : value;
 }
 
 function buildAgentEnv(data) {
   const env = {};
-  const agentGender = normalizeAgentGender(data);
-  const agentLanguage = normalizeAgentLanguage(data);
-  const agentName = normalizeAgentName(data);
+  const agentGender = normalizedField(data, "agentGender", { lowercase: true });
+  const agentLanguage = normalizedField(data, "agentLanguage", { lowercase: true });
+  const agentName = normalizedField(data, "agentName");
   if (agentGender) {
     env.AGENT_GENDER = agentGender;
   }
@@ -405,12 +405,32 @@ console.log(
 
 let unsubscribe = null;
 
-function scheduleSettingsResubscribe(reason = "snapshot error") {
+function scheduleSettingsResubscribe(reason = "snapshot error", attemptDelayMs = null) {
+  if (desiredLive) {
+    deferredResubscribeReason = reason;
+    if (!resubscribeTimer) {
+      const deferDelayMs = 30000;
+      console.warn(
+        `[live-watch] deferring Firestore resubscribe while live=true; retrying in ${deferDelayMs}ms: ${reason}`
+      );
+      resubscribeTimer = setTimeout(() => {
+        resubscribeTimer = null;
+        scheduleSettingsResubscribe(
+          deferredResubscribeReason || "deferred while live=true"
+        );
+      }, deferDelayMs);
+    }
+    return;
+  }
+
   if (resubscribeTimer) {
     return;
   }
   resubscribeAttempts += 1;
-  const delayMs = Math.min(30000, 500 * Math.pow(2, resubscribeAttempts - 1));
+  const delayMs =
+    typeof attemptDelayMs === "number" && attemptDelayMs >= 0
+      ? Math.floor(attemptDelayMs)
+      : Math.min(30000, 500 * Math.pow(2, resubscribeAttempts - 1));
   console.warn(
     `[live-watch] scheduling Firestore resubscribe in ${delayMs}ms (attempt ${resubscribeAttempts}): ${reason}`
   );
@@ -428,6 +448,9 @@ function startSnapshotWatchdog() {
     return;
   }
   snapshotWatchdogTimer = setInterval(() => {
+    if (desiredLive) {
+      return;
+    }
     const ageMs = Date.now() - lastSubscribeAtMs;
     if (ageMs < FIREBASE_PERIODIC_RESUBSCRIBE_MS) {
       return;
@@ -461,18 +484,8 @@ process.on("SIGINT", () => cleanupAndExit("SIGINT"));
 process.on("SIGTERM", () => cleanupAndExit("SIGTERM"));
 
 async function resolveDocId() {
-  const login =
-    optionalEnv("FIREBASE_AUTH_USERNAME") || optionalEnv("FIREBASE_AUTH_EMAIL");
-  const password = requiredEnv("FIREBASE_AUTH_PASSWORD");
-
-  if (!login) {
-    throw new Error(
-      "Missing FIREBASE_AUTH_USERNAME (or FIREBASE_AUTH_EMAIL) in config/.env."
-    );
-  }
-
-  const credential = await signInWithEmailAndPassword(auth, login, password);
-  const uid = credential.user && credential.user.uid ? credential.user.uid : "";
+  const user = await ensureSignedInUser();
+  const uid = user && user.uid ? user.uid : "";
   if (!uid) {
     throw new Error("Firebase sign-in succeeded but no uid was returned.");
   }
@@ -518,11 +531,8 @@ async function subscribeToSettings(docIdHint = "") {
         console.log("[live-watch] agent env: none");
       }
 
-      if (live && lastLiveValue !== true) {
-        startAgentSession().catch((err) => {
-          console.error("[live-watch] failed to start agent:", err);
-        });
-      } else if (live && !restartTimer) {
+      const shouldStartSession = live && (lastLiveValue !== true || !restartTimer);
+      if (shouldStartSession) {
         startAgentSession().catch((err) => {
           console.error("[live-watch] failed to ensure running agent:", err);
         });
@@ -530,6 +540,12 @@ async function subscribeToSettings(docIdHint = "") {
         stopAgentSession("live changed true -> false").catch((err) => {
           console.error("[live-watch] failed to stop agent:", err);
         });
+      }
+
+      if (!live && deferredResubscribeReason && !resubscribeTimer) {
+        const reason = deferredResubscribeReason;
+        deferredResubscribeReason = "";
+        scheduleSettingsResubscribe(`deferred until live=false: ${reason}`, 0);
       }
 
       lastLiveValue = live;
