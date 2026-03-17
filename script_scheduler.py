@@ -114,6 +114,7 @@ def _run_script(path: Path) -> ScriptResult:
 
 
 def _run_batch() -> None:
+    print(f"[scheduler] batch started at {_timestamp()}")
     scripts = _discover_scripts()
     if not scripts:
         print(f"[scheduler] no runnable scripts found in {SCRIPTS_DIR}")
@@ -170,3 +171,17 @@ def start_script_scheduler() -> threading.Thread:
         f"with timeout={SCRIPT_TIMEOUT_SECONDS}s"
     )
     return thread
+
+
+def main() -> None:
+    SCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    print(
+        f"[scheduler] started minute runner for {SCRIPTS_DIR} "
+        f"with timeout={SCRIPT_TIMEOUT_SECONDS}s"
+    )
+    _scheduler_loop()
+
+
+if __name__ == "__main__":
+    main()

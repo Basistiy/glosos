@@ -69,6 +69,7 @@ const collectionName = "user_settings";
 const tokenEndpointUrl = "https://getlivekittokenagent-wxo2praqea-uc.a.run.app";
 const restartOnCleanExit = optionalEnv("RESTART_ON_CLEAN_EXIT", "true").toLowerCase() === "true";
 const runCommand = resolveRunCommand();
+const schedulerRunCommand = resolveSchedulerRunCommand();
 const projectRoot = path.resolve(__dirname);
 
 const app = initializeApp(firebaseConfig);
@@ -77,12 +78,16 @@ const auth = getAuth(app);
 
 let lastLiveValue = null;
 let runningChild = null;
+let schedulerChild = null;
 let latestAgentEnv = {};
 let desiredLive = false;
 let restartTimer = null;
 let restartAttempts = 0;
 let startRequestSeq = 0;
 let childStartedAtMs = 0;
+let schedulerRestartTimer = null;
+let schedulerRestartAttempts = 0;
+let schedulerChildStartedAtMs = 0;
 let settingsDocId = "";
 let resubscribeTimer = null;
 let resubscribeAttempts = 0;
@@ -173,6 +178,15 @@ function resolveRunCommand() {
     return "uv run python token_agent.py --daemon";
   } catch {
     return "python token_agent.py --daemon";
+  }
+}
+
+function resolveSchedulerRunCommand() {
+  try {
+    execSync("command -v uv", { stdio: "ignore", shell: true });
+    return "uv run python script_scheduler.py";
+  } catch {
+    return "python script_scheduler.py";
   }
 }
 
@@ -326,6 +340,65 @@ async function ensureAgentProcessRunning() {
       const action = desiredLive ? startAgentSession : ensureAgentProcessRunning;
       action().catch((err) => {
         console.error("[live-watch] failed to restart token daemon:", err);
+      });
+    }, delayMs);
+  });
+}
+
+async function ensureSchedulerProcessRunning() {
+  if (schedulerChild && !schedulerChild.killed) {
+    return;
+  }
+
+  if (schedulerRestartTimer) {
+    clearTimeout(schedulerRestartTimer);
+    schedulerRestartTimer = null;
+  }
+
+  console.log(`[live-watch] starting scheduler: ${schedulerRunCommand}`);
+  schedulerChildStartedAtMs = Date.now();
+  schedulerChild = spawn(schedulerRunCommand, {
+    cwd: projectRoot,
+    stdio: ["ignore", "pipe", "pipe"],
+    shell: true,
+    env: { ...process.env },
+  });
+  pipeWithTimestampPrefix(schedulerChild.stdout, process.stdout);
+  pipeWithTimestampPrefix(schedulerChild.stderr, process.stderr);
+
+  schedulerChild.on("exit", (code, signal) => {
+    const uptimeMs = Math.max(0, Date.now() - schedulerChildStartedAtMs);
+    console.log(
+      `[live-watch] scheduler exited code=${code ?? "null"} signal=${signal ?? "null"} uptimeMs=${uptimeMs}`
+    );
+    schedulerChild = null;
+
+    if (uptimeMs >= UPTIME_RESET_MS) {
+      schedulerRestartAttempts = 0;
+    }
+    schedulerRestartAttempts += 1;
+    const exponentialDelayMs = Math.min(
+      MAX_RESTART_DELAY_MS,
+      500 * Math.pow(2, schedulerRestartAttempts - 1)
+    );
+    const isCleanExit = code === 0 || signal === "SIGINT";
+    if (isCleanExit && !restartOnCleanExit) {
+      console.log(
+        "[live-watch] clean scheduler exit; restart disabled (set RESTART_ON_CLEAN_EXIT=true to enable)"
+      );
+      schedulerRestartAttempts = 0;
+      return;
+    }
+    const delayMs = isCleanExit
+      ? Math.max(MIN_CLEAN_RESTART_DELAY_MS, exponentialDelayMs)
+      : exponentialDelayMs;
+    console.log(
+      `[live-watch] scheduling scheduler restart in ${delayMs}ms (attempt ${schedulerRestartAttempts})`
+    );
+    schedulerRestartTimer = setTimeout(() => {
+      schedulerRestartTimer = null;
+      ensureSchedulerProcessRunning().catch((err) => {
+        console.error("[live-watch] failed to restart scheduler:", err);
       });
     }, delayMs);
   });
@@ -497,6 +570,9 @@ function cleanupAndExit(signal) {
     sendAgentCommand({ cmd: "shutdown" });
     runningChild.kill("SIGINT");
   }
+  if (schedulerChild && !schedulerChild.killed) {
+    schedulerChild.kill("SIGINT");
+  }
 
   process.exit(0);
 }
@@ -593,6 +669,7 @@ async function subscribeToSettings(docIdHint = "") {
 }
 
 async function main() {
+  await ensureSchedulerProcessRunning();
   settingsDocId = await resolveDocId();
   await ensureAgentProcessRunning();
   await subscribeToSettings(settingsDocId);

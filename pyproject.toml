@@ -1,6 +1,6 @@
 [project]
 name = "glosos"
-version = "0.0.8"
+version = "0.0.9"
 requires-python = ">=3.14"
 dependencies = [
     "livekit-agents[google,silero,turn-detector]~=1.4",
