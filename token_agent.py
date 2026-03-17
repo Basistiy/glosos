@@ -87,6 +87,7 @@ def _normalized_metric_type(value: object) -> str:
     text = str(value or "").strip().lower()
     if not text:
         return ""
+    if "." in text:
         text = text.split(".")[-1]
     text = text.replace("-", "_")
     aliases = {
