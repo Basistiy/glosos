@@ -9,7 +9,6 @@ from typing import Any
 from dotenv import load_dotenv
 from livekit import rtc
 from livekit.agents.voice import room_io
-from livekit.plugins import noise_cancellation
 
 from agent import (
     Assistant,
@@ -63,6 +62,26 @@ def _apply_agent_env(agent_env: dict[str, Any] | None) -> None:
         os.environ.pop(key, None)
 
 
+def _participant_identity(participant: object) -> str:
+    identity = getattr(participant, "identity", "")
+    return str(identity).strip() or "unknown"
+
+
+def _kind_name(value: object) -> str:
+    kind = getattr(value, "kind", None)
+    if kind is None:
+        return "unknown"
+    text = str(kind)
+    if "." in text:
+        text = text.split(".")[-1]
+    return text.lower()
+
+
+def _sid(value: object) -> str:
+    sid = getattr(value, "sid", "")
+    return str(sid).strip() or "unknown"
+
+
 async def _run_token_session(
     *,
     livekit_token: str,
@@ -81,6 +100,48 @@ async def _run_token_session(
     def _on_disconnected(reason: object) -> None:
         print(f"[token-agent] disconnected: {reason}")
         disconnected.set()
+
+    @room.on("participant_connected")
+    def _on_participant_connected(participant: object) -> None:
+        print(
+            "[token-agent] participant connected: "
+            f"identity={_participant_identity(participant)}"
+        )
+
+    @room.on("participant_disconnected")
+    def _on_participant_disconnected(participant: object) -> None:
+        print(
+            "[token-agent] participant disconnected: "
+            f"identity={_participant_identity(participant)}"
+        )
+
+    @room.on("track_subscribed")
+    def _on_track_subscribed(*args: object) -> None:
+        track = args[0] if len(args) > 0 else None
+        publication = args[1] if len(args) > 1 else None
+        participant = args[2] if len(args) > 2 else None
+        kind = _kind_name(publication if publication is not None else track)
+        if "audio" not in kind:
+            return
+        print(
+            "[token-agent] audio track subscribed: "
+            f"participant={_participant_identity(participant)} "
+            f"publication_sid={_sid(publication)} track_sid={_sid(track)} kind={kind}"
+        )
+
+    @room.on("track_unsubscribed")
+    def _on_track_unsubscribed(*args: object) -> None:
+        track = args[0] if len(args) > 0 else None
+        publication = args[1] if len(args) > 1 else None
+        participant = args[2] if len(args) > 2 else None
+        kind = _kind_name(publication if publication is not None else track)
+        if "audio" not in kind:
+            return
+        print(
+            "[token-agent] audio track unsubscribed: "
+            f"participant={_participant_identity(participant)} "
+            f"publication_sid={_sid(publication)} track_sid={_sid(track)} kind={kind}"
+        )
 
     session = build_agent_session()
     state_publish_tasks: set[asyncio.Task[None]] = set()
@@ -124,6 +185,12 @@ async def _run_token_session(
 
         await room.connect(LIVEKIT_URL, livekit_token)
         print(f"[token-agent] connected to room: {room.name}")
+        try:
+            remote_count = len(getattr(room, "remote_participants", {}) or {})
+        except Exception:
+            remote_count = -1
+        if remote_count >= 0:
+            print(f"[token-agent] remote participants at connect: {remote_count}")
         if linked_identity:
             print(f"[token-agent] room input participant_identity={linked_identity}")
         _schedule_state_publish("initializing")
@@ -136,8 +203,7 @@ async def _run_token_session(
 
         room_options = room_io.RoomOptions(
             audio_input=room_io.AudioInputOptions(
-                pre_connect_audio=True,
-                noise_cancellation=noise_cancellation.BVC(),
+                pre_connect_audio=False,
             ),
         )
         if linked_identity:
