@@ -39,6 +39,7 @@ def print(*args, **kwargs):  # type: ignore[no-redef]
 
 load_dotenv("config/.env")
 ATTRIBUTE_AGENT_STATE = "lk.agent.state"
+LOGGED_METRIC_TYPES = {"stt_metrics", "llm_metrics", "tts_metrics", "eou_metrics"}
 
 
 def _required_env(name: str) -> str:
@@ -80,6 +81,22 @@ def _kind_name(value: object) -> str:
 def _sid(value: object) -> str:
     sid = getattr(value, "sid", "")
     return str(sid).strip() or "unknown"
+
+
+def _normalized_metric_type(value: object) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+        text = text.split(".")[-1]
+    text = text.replace("-", "_")
+    aliases = {
+        "stt": "stt_metrics",
+        "llm": "llm_metrics",
+        "tts": "tts_metrics",
+        "eou": "eou_metrics",
+        "vad": "vad_metrics",
+    }
+    return aliases.get(text, text)
 
 
 async def _run_token_session(
@@ -167,8 +184,31 @@ async def _run_token_session(
         new_state = getattr(event, "new_state", "")
         old_state = getattr(event, "old_state", "")
         print(f"[token-agent] state: {old_state} -> {new_state}")
+
         if isinstance(new_state, str) and new_state:
             _schedule_state_publish(new_state)
+
+    @session.on("metrics_collected")
+    def _on_metrics_collected(event: object) -> None:
+        metrics = getattr(event, "metrics", None)
+        if metrics is None:
+            return
+        try:
+            payload = metrics.model_dump()
+        except Exception:
+            payload = str(metrics)
+        metric_type = ""
+        if isinstance(payload, dict):
+            metric_type = _normalized_metric_type(payload.get("type", ""))
+        if not metric_type:
+            metric_type = _normalized_metric_type(getattr(metrics, "type", ""))
+        if metric_type and metric_type not in LOGGED_METRIC_TYPES:
+            return
+        try:
+            serialized = json.dumps(payload, ensure_ascii=False, default=str)
+        except Exception:
+            serialized = json.dumps({"raw": str(payload)}, ensure_ascii=False)
+        print(f"[livekit-metrics] {serialized}")
 
     async def _send_file(path: Path, topic: str, destination_identities: list[str]) -> str:
         info = await room.local_participant.send_file(

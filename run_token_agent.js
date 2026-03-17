@@ -117,6 +117,24 @@ function pipeWithTimestampPrefix(readable, writable) {
     return;
   }
 
+  function shouldDropChildLogLine(line) {
+    const text = String(line || "").trim();
+    if (!text) {
+      return true;
+    }
+    if (
+      text.includes(
+        "pre-connect audio handler registered after room connection, start RoomIO before ctx.connect()"
+      )
+    ) {
+      return true;
+    }
+    if (text.includes("timeout waiting for pre-connect audio buffer")) {
+      return true;
+    }
+    return false;
+  }
+
   let buffer = "";
   readable.setEncoding("utf8");
   readable.on("data", (chunk) => {
@@ -124,6 +142,9 @@ function pipeWithTimestampPrefix(readable, writable) {
     const lines = buffer.split(/\r?\n/);
     buffer = lines.pop() || "";
     for (const line of lines) {
+      if (shouldDropChildLogLine(line)) {
+        continue;
+      }
       if (/^\[\d{2}:\d{2}:\d{2}\]/.test(line)) {
         writable.write(`${line}\n`);
       } else {
@@ -132,7 +153,7 @@ function pipeWithTimestampPrefix(readable, writable) {
     }
   });
   readable.on("end", () => {
-    if (!buffer) {
+    if (!buffer || shouldDropChildLogLine(buffer)) {
       return;
     }
     if (/^\[\d{2}:\d{2}:\d{2}\]/.test(buffer)) {

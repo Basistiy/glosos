@@ -2,8 +2,6 @@
 LIVEKIT_URL = "wss://glosos-uti53aki.livekit.cloud"
 GOOGLE_CREDENTIALS_FILE = "config/google-service-account.json"
 STT_MODEL = "chirp_3"
-# A/B option for faster responsiveness:
-# STT_MODEL = "latest_short"
 LLM_MODEL = "gemini-3-flash"
 TTS_MODEL = "chirp_3"
 TTS_VOICE_NAME = "en-US-Chirp3-HD-Charon"
@@ -11,8 +9,8 @@ GOOGLE_STT_LOCATION = "eu"
 GOOGLE_LLM_LOCATION = "global"
 STT_LANGUAGE = "en-US"
 STT_USE_STREAMING = true
-MIN_ENDPOINTING_DELAY = 0.35
-MAX_ENDPOINTING_DELAY = 1.2
+MIN_ENDPOINTING_DELAY = 0.2
+MAX_ENDPOINTING_DELAY = 0.6
 
 # Non-secret Firebase settings for run_token_agent_firebase.py
 FIREBASE_LIVEKIT_TOKEN_URL = "https://getlivekittokenagent-wxo2praqea-uc.a.run.app"
