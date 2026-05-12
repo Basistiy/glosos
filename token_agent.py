@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 import os
 import sys
@@ -6,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import aiohttp
 from dotenv import load_dotenv
 from livekit import rtc
 from livekit.agents.voice import room_io
@@ -34,6 +36,7 @@ _builtin_print = print
 
 
 def print(*args, **kwargs):  # type: ignore[no-redef]
+    kwargs.setdefault("flush", True)
     _builtin_print(f"[{_now_hms()}]", *args, **kwargs)
 
 
@@ -161,7 +164,8 @@ async def _run_token_session(
             f"publication_sid={_sid(publication)} track_sid={_sid(track)} kind={kind}"
         )
 
-    session = build_agent_session()
+    http_session = aiohttp.ClientSession()
+    session = build_agent_session(http_session=http_session)
     state_publish_tasks: set[asyncio.Task[None]] = set()
 
     async def _publish_agent_state(state: str) -> None:
@@ -238,8 +242,10 @@ async def _run_token_session(
 
         if stop_event is not None and stop_event.is_set():
             print("[token-agent] stop requested right after connect, disconnecting room")
-            await room.disconnect()
-            await disconnected.wait()
+            with contextlib.suppress(asyncio.CancelledError):
+                await room.disconnect()
+            with contextlib.suppress(asyncio.CancelledError):
+                await disconnected.wait()
             return
 
         room_options = room_io.RoomOptions(
@@ -273,9 +279,10 @@ async def _run_token_session(
                 print("[token-agent] stop requested, disconnecting room")
                 try:
                     await room.disconnect()
-                except Exception as exc:
+                except BaseException as exc:
                     print(f"[token-agent] room.disconnect failed: {exc}")
-                await disconnected.wait()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await disconnected.wait()
     finally:
         for task in list(state_publish_tasks):
             task.cancel()
@@ -286,10 +293,9 @@ async def _run_token_session(
             except Exception as exc:
                 print(f"[token-agent] session close failed: {exc}")
         if not disconnected.is_set():
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await room.disconnect()
-            except Exception:
-                pass
+        await http_session.close()
 
 
 class TokenAgentDaemon:

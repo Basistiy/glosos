@@ -137,6 +137,7 @@ config/.env
 config/google-service-account.json
 user/
 .venv
+node_modules/
 env/
 venv/
 ENV/

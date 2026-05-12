@@ -7,7 +7,6 @@ CONFIG_DIR="$WORK_DIR/config"
 USER_DIR="$WORK_DIR/user"
 ENV_FILE="$CONFIG_DIR/.env"
 DEFAULTS_FILE="$CONFIG_DIR/defaults.toml"
-GOOGLE_CREDS_FILE="$CONFIG_DIR/google-service-account.json"
 COMPOSE_FILE="$WORK_DIR/docker-compose.glosos.yml"
 
 require_cmd() {
@@ -43,23 +42,30 @@ read -r -p "FIREBASE_WEB_API_KEY: " firebase_web_api_key
 read -r -p "FIREBASE_AUTH_USERNAME (email): " firebase_auth_username
 read -r -s -p "FIREBASE_AUTH_PASSWORD: " firebase_auth_password
 echo
+read -r -s -p "GOOGLE_API_KEY (Gemini API): " google_api_key
+echo
+read -r -s -p "CARTESIA_API_KEY: " cartesia_api_key
+echo
 
-if [[ -z "${firebase_web_api_key:-}" || -z "${firebase_auth_username:-}" || -z "${firebase_auth_password:-}" ]]; then
-  echo "FIREBASE_WEB_API_KEY, FIREBASE_AUTH_USERNAME, and FIREBASE_AUTH_PASSWORD are required."
+if [[ -z "${firebase_web_api_key:-}" || -z "${firebase_auth_username:-}" || -z "${firebase_auth_password:-}" || -z "${google_api_key:-}" || -z "${cartesia_api_key:-}" ]]; then
+  echo "FIREBASE_WEB_API_KEY, FIREBASE_AUTH_USERNAME, FIREBASE_AUTH_PASSWORD, GOOGLE_API_KEY, and CARTESIA_API_KEY are required."
   exit 1
 fi
 
 cat > "$DEFAULTS_FILE" <<EOF
 [agent]
 LIVEKIT_URL = "$livekit_url"
-GOOGLE_CREDENTIALS_FILE = "config/google-service-account.json"
-STT_MODEL = "latest_long"
+GOOGLE_CREDENTIALS_FILE = ""
+STT_PROVIDER = "cartesia"
+STT_MODEL = "ink-whisper"
+LLM_PROVIDER = "google_api"
 LLM_MODEL = "gemini-3-flash"
-TTS_MODEL = "chirp_3"
-TTS_VOICE_NAME = "en-US-Chirp3-HD-Charon"
+TTS_PROVIDER = "cartesia"
+TTS_MODEL = "sonic-3"
+TTS_VOICE_NAME = "f786b574-daa5-4673-aa0c-cbe3e8534c02"
 GOOGLE_STT_LOCATION = "eu"
 GOOGLE_LLM_LOCATION = "global"
-STT_LANGUAGE = "en-US"
+STT_LANGUAGE = "en"
 STT_USE_STREAMING = true
 MIN_ENDPOINTING_DELAY = 0.1
 MAX_ENDPOINTING_DELAY = 0.6
@@ -69,34 +75,11 @@ cat > "$ENV_FILE" <<EOF
 FIREBASE_WEB_API_KEY=$firebase_web_api_key
 FIREBASE_AUTH_USERNAME=$firebase_auth_username
 FIREBASE_AUTH_PASSWORD=$firebase_auth_password
+GOOGLE_API_KEY=$google_api_key
+CARTESIA_API_KEY=$cartesia_api_key
 EOF
 
 chmod 600 "$ENV_FILE"
-
-echo
-echo "Provide path to Google service account JSON file."
-echo "Tip: drag and drop the JSON file into this terminal to auto-fill its path."
-read -r -p "Path to Google service account JSON file: " source_google_creds_file
-if [[ -z "${source_google_creds_file:-}" ]]; then
-  echo "Credentials file path is required."
-  exit 1
-fi
-if [[ ! -f "$source_google_creds_file" ]]; then
-  echo "File not found: $source_google_creds_file"
-  exit 1
-fi
-cp "$source_google_creds_file" "$GOOGLE_CREDS_FILE"
-
-if command -v python3 >/dev/null 2>&1; then
-  if ! python3 -c 'import json,sys; json.load(open(sys.argv[1], "r", encoding="utf-8"))' "$GOOGLE_CREDS_FILE"; then
-    echo "Invalid JSON. Please run setup again."
-    exit 1
-  fi
-else
-  echo "Warning: python3 not found, JSON validation skipped."
-fi
-
-chmod 600 "$GOOGLE_CREDS_FILE"
 
 cat > "$COMPOSE_FILE" <<EOF
 services:
@@ -127,7 +110,6 @@ echo
 echo "Setup complete."
 echo "Created: $DEFAULTS_FILE"
 echo "Created: $ENV_FILE"
-echo "Created: $GOOGLE_CREDS_FILE"
 echo "Created: $COMPOSE_FILE"
 echo "Prepared: $USER_DIR"
 echo

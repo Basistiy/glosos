@@ -20,9 +20,9 @@ Shared agent logic is in [`agent.py`](agent.py), and worker startup/registration
 - `python-dotenv`
 
 Configured pipeline in `agent.py`:
-- STT: `assemblyai/universal-streaming`
-- LLM: `gemini-3-flash` (resolved to Vertex model id `gemini-3-flash-preview`)
-- TTS: `inworld/inworld-tts-1.5-max`
+- STT: Cartesia (`ink-whisper`)
+- LLM: Google Gemini API (`gemini-3-flash` -> `gemini-3-flash-preview`)
+- TTS: Cartesia (`sonic-3`)
 - VAD: Silero
 - Turn detection: multilingual model
 
@@ -41,14 +41,25 @@ Configured pipeline in `agent.py`:
 
 This project uses a split configuration model:
 - committed non-secret defaults in `config/defaults.toml`,
-- local secrets in `config/.env` and `config/google-service-account.json` (gitignored).
+- local secrets in `config/.env`,
+- optional Google service account JSON in `config/google-service-account.json` when using Google Cloud STT/TTS or Vertex AI.
 
-Runtime settings such as `STT_MODEL`, `LLM_MODEL`, `TTS_MODEL`, `TTS_VOICE_NAME`,
-`STT_LANGUAGE`, `STT_USE_STREAMING`, endpointing delays, and `GOOGLE_LLM_LOCATION` are read from
-`config/defaults.toml` (no env overrides for settings).
-`LIVEKIT_URL` and `GOOGLE_CREDENTIALS_FILE` are also read only from `config/defaults.toml`.
-`GOOGLE_LLM_LOCATION` is required.
-For Gemini 3 Flash on Vertex AI, set `GOOGLE_LLM_LOCATION=global`.
+Runtime settings such as `STT_PROVIDER`, `STT_MODEL`, `LLM_PROVIDER`, `LLM_MODEL`,
+`TTS_PROVIDER`, `TTS_MODEL`, `TTS_VOICE_NAME`, `STT_LANGUAGE`, `STT_USE_STREAMING`, and
+endpointing delays are read from `config/defaults.toml` (no env overrides for settings).
+`LIVEKIT_URL`, `GOOGLE_CREDENTIALS_FILE`, `GOOGLE_STT_LOCATION`, and `GOOGLE_LLM_LOCATION`
+are also read only from `config/defaults.toml`.
+
+Default provider setup in this repo:
+- STT uses Cartesia credentials from `CARTESIA_API_KEY`
+- LLM uses Gemini API credentials from `GOOGLE_API_KEY`
+- TTS uses Cartesia credentials from `CARTESIA_API_KEY`
+
+If you switch `LLM_PROVIDER` to `vertex_ai`, also set `GOOGLE_LLM_LOCATION` in
+`config/defaults.toml`. For Gemini 3 Flash on Vertex AI, `GOOGLE_LLM_LOCATION` must be `global`.
+If you switch `STT_PROVIDER` or `TTS_PROVIDER` to `google_cloud`, set
+`GOOGLE_CREDENTIALS_FILE` to your service account JSON path and keep `GOOGLE_STT_LOCATION`
+configured. If you switch `TTS_PROVIDER` to `deepgram`, set `DEEPGRAM_API_KEY`.
 
 Create a local `config/.env` file with secrets used by your chosen mode.
 
@@ -56,17 +67,22 @@ Required for default Firebase launcher mode (`node run_token_agent.js`):
 - `FIREBASE_WEB_API_KEY`
 - `FIREBASE_AUTH_USERNAME` (or `FIREBASE_AUTH_EMAIL`)
 - `FIREBASE_AUTH_PASSWORD`
+- `GOOGLE_API_KEY`
+- `CARTESIA_API_KEY`
 
 Required for worker mode (`python secret_agent.py`):
 - `LIVEKIT_API_KEY`
 - `LIVEKIT_API_SECRET`
+- `GOOGLE_API_KEY`
+- `CARTESIA_API_KEY`
 
-Google credentials are read from:
+Google service-account credentials are needed only when using Google-backed speech or Vertex AI.
+When they are needed, the file path is read from:
 - `config/google-service-account.json`.
 
 Startup fails fast if required secrets/settings are missing or invalid.
 
-Keep `config/.env` and `config/google-service-account.json` private and never commit real secrets.
+Keep `config/.env` and any service-account JSON private and never commit real secrets.
 The app reads secrets only from `config/`.
 You can bootstrap from the template:
 ```bash
@@ -78,6 +94,7 @@ cp config/.env.example config/.env
 1. Install dependencies:
 ```bash
 uv sync
+npm install
 ```
 
 2. Set secret environment variables in `config/.env` (see `config/.env.example`), then start one mode:
@@ -95,12 +112,14 @@ Requires a valid `LIVEKIT_URL` in `config/defaults.toml` and `LIVEKIT_TOKEN`.
 
 Token-only participant mode with Firebase username/password + backend token endpoint:
 ```bash
-node run_token_agent.js
+npm start
 ```
 Required env vars:
 - `FIREBASE_WEB_API_KEY`
 - `FIREBASE_AUTH_USERNAME` (or `FIREBASE_AUTH_EMAIL`)
 - `FIREBASE_AUTH_PASSWORD`
+- `GOOGLE_API_KEY`
+- `CARTESIA_API_KEY`
 
 Notes:
 - Firebase project metadata and token endpoint URL are currently hardcoded in `run_token_agent.js`.
@@ -156,9 +175,8 @@ bash scripts/setup.sh
 ```
 
 The script will:
-- create all required runtime files (`config/defaults.toml`, `config/.env`, `config/google-service-account.json`, `user/`, `docker-compose.glosos.yml`),
-- ask for `FIREBASE_WEB_API_KEY`, `FIREBASE_AUTH_USERNAME`, and `FIREBASE_AUTH_PASSWORD`,
-- import Google service account JSON from a file path (you can drag and drop the JSON file into terminal to auto-fill the path),
+- create all required runtime files (`config/defaults.toml`, `config/.env`, `user/`, `docker-compose.glosos.yml`),
+- ask for `FIREBASE_WEB_API_KEY`, `FIREBASE_AUTH_USERNAME`, `FIREBASE_AUTH_PASSWORD`, `GOOGLE_API_KEY`, and `CARTESIA_API_KEY`,
 - pull `ghcr.io/basistiy/glosos:latest` (or `GLOSOS_IMAGE` if set),
 - optionally start `docker compose -f docker-compose.glosos.yml up -d` immediately.
 

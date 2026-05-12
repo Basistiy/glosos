@@ -7,12 +7,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Awaitable, Callable
 
+import aiohttp
 import tomllib
 from livekit import rtc
 from google.genai import types as genai_types
 from livekit.agents import Agent, AgentSession, function_tool, get_job_context
 from livekit.agents.llm import ImageContent
-from livekit.plugins import google, silero
+from livekit.plugins import cartesia, deepgram, google, silero
 
 ROOT = Path(__file__).resolve().parent
 DEFAULTS_PATH = ROOT / "config" / "defaults.toml"
@@ -26,6 +27,7 @@ _builtin_print = print
 
 
 def print(*args, **kwargs):  # type: ignore[no-redef]
+    kwargs.setdefault("flush", True)
     _builtin_print(f"[{_now_hms()}]", *args, **kwargs)
 
 
@@ -79,6 +81,15 @@ def _required_float_setting(name: str) -> float:
         raise RuntimeError(f"Invalid float runtime setting for {name}: {raw!r}") from exc
 
 
+def _optional_str_setting(name: str) -> str:
+    value = _setting_source_value(name)
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (int, float)):
+        return str(value).strip()
+    return ""
+
+
 def _bool_setting(name: str) -> bool:
     value = _setting_source_value(name)
     if isinstance(value, bool):
@@ -96,14 +107,30 @@ def _bool_setting(name: str) -> bool:
     return False
 
 
+def _provider_setting(name: str, default: str, allowed: set[str]) -> str:
+    raw = (_optional_str_setting(name) or default).strip().lower().replace("-", "_")
+    if raw not in allowed:
+        options = ", ".join(sorted(allowed))
+        raise RuntimeError(
+            f"Invalid provider runtime setting for {name}: {raw!r}. "
+            f"Expected one of: {options}."
+        )
+    return raw
+
+
 STT_MODEL = _required_str_setting("STT_MODEL")
+STT_PROVIDER = _provider_setting("STT_PROVIDER", "google_cloud", {"cartesia", "google_cloud"})
+LLM_PROVIDER = _provider_setting("LLM_PROVIDER", "vertex_ai", {"google_api", "vertex_ai"})
 LLM_MODEL = _required_str_setting("LLM_MODEL")
+TTS_PROVIDER = _provider_setting(
+    "TTS_PROVIDER", "google_cloud", {"cartesia", "deepgram", "google_cloud"}
+)
 TTS_MODEL = _required_str_setting("TTS_MODEL")
 TTS_VOICE_NAME = _required_str_setting("TTS_VOICE_NAME")
 LIVEKIT_URL = _required_str_setting("LIVEKIT_URL")
-GOOGLE_CREDENTIALS_FILE = _required_str_setting("GOOGLE_CREDENTIALS_FILE")
-GOOGLE_STT_LOCATION = _required_str_setting("GOOGLE_STT_LOCATION")
-GOOGLE_LLM_LOCATION = _required_str_setting("GOOGLE_LLM_LOCATION")
+GOOGLE_CREDENTIALS_FILE = _optional_str_setting("GOOGLE_CREDENTIALS_FILE")
+GOOGLE_STT_LOCATION = _optional_str_setting("GOOGLE_STT_LOCATION")
+GOOGLE_LLM_LOCATION = _optional_str_setting("GOOGLE_LLM_LOCATION")
 STT_LANGUAGE = _required_str_setting("STT_LANGUAGE")
 STT_USE_STREAMING = _bool_setting("STT_USE_STREAMING")
 MIN_ENDPOINTING_DELAY = _required_float_setting("MIN_ENDPOINTING_DELAY")
@@ -124,6 +151,43 @@ STT_LANGUAGE_BY_AGENT_LANGUAGE = {
     "spanish": "es-ES",
 }
 ENGLISH_STT_FALLBACK = "en-US"
+
+
+def _required_env(name: str, *, reason: str) -> str:
+    value = (os.getenv(name) or "").strip()
+    if value:
+        return value
+    raise RuntimeError(f"Missing required environment variable: {name}. {reason}")
+
+
+def _llm_provider_label() -> str:
+    if LLM_PROVIDER == "google_api":
+        return "google-gemini-api"
+    return "vertex-ai-service-account"
+
+
+def _stt_provider_label() -> str:
+    if STT_PROVIDER == "cartesia":
+        return "cartesia"
+    return "google-cloud"
+
+
+def _tts_provider_label() -> str:
+    if TTS_PROVIDER == "cartesia":
+        return "cartesia"
+    if TTS_PROVIDER == "deepgram":
+        return "deepgram"
+    return "google-cloud"
+
+
+def _cartesia_api_key() -> str:
+    return _required_env(
+        "CARTESIA_API_KEY",
+        reason=(
+            "Set it in config/.env when [agent].STT_PROVIDER or "
+            "[agent].TTS_PROVIDER is cartesia."
+        ),
+    )
 
 
 def _read_pyproject(pyproject_path: Path) -> tuple[str, str, str, int]:
@@ -181,7 +245,10 @@ def _build_project_context() -> str:
         f"- models: stt={STT_MODEL}, llm={LLM_MODEL}, tts={TTS_MODEL}",
         f"- livekit-url: {LIVEKIT_URL}",
         f"- stt-streaming: {STT_USE_STREAMING}",
-        "- llm-provider: vertex-ai-service-account",
+        (
+            f"- providers: stt={_stt_provider_label()}, "
+            f"llm={_llm_provider_label()}, tts={_tts_provider_label()}"
+        ),
         f"- key-files-present: {', '.join(existing_files) if existing_files else 'none'}",
         f"- key-files-missing: {', '.join(missing_files) if missing_files else 'none'}",
         f"- user-root: {user_root if user_root.exists() else f'{user_root} (missing)'}",
@@ -224,6 +291,12 @@ def _print_project_inspection() -> None:
 
 
 def _google_credentials_file() -> str:
+    if not GOOGLE_CREDENTIALS_FILE:
+        raise RuntimeError(
+            "Missing runtime setting: GOOGLE_CREDENTIALS_FILE. "
+            f"Set [agent].GOOGLE_CREDENTIALS_FILE in {DEFAULTS_PATH} when using "
+            "Google Cloud STT/TTS or Vertex AI."
+        )
     configured = Path(GOOGLE_CREDENTIALS_FILE).expanduser()
     if not configured.is_absolute():
         configured = ROOT / configured
@@ -246,10 +319,6 @@ def _build_google_llm() -> google.LLM:
     resolved_llm_model = {
         "gemini-3-flash": "gemini-3-flash-preview",
     }.get(LLM_MODEL, LLM_MODEL)
-    if resolved_llm_model == "gemini-3-flash-preview" and GOOGLE_LLM_LOCATION != "global":
-        raise RuntimeError(
-            "Gemini 3 Flash on Vertex AI currently requires GOOGLE_LLM_LOCATION=global."
-        )
 
     thinking_config = genai_types.ThinkingConfig(
         thinking_level=genai_types.ThinkingLevel.LOW,
@@ -257,11 +326,28 @@ def _build_google_llm() -> google.LLM:
     )
     llm_kwargs = {
         "model": resolved_llm_model,
-        "vertexai": True,
-        "location": GOOGLE_LLM_LOCATION,
         "temperature": 0.4,
         "thinking_config": thinking_config,
     }
+    if LLM_PROVIDER == "google_api":
+        google_api_key = _required_env(
+            "GOOGLE_API_KEY",
+            reason="Set it in config/.env when [agent].LLM_PROVIDER is google_api.",
+        )
+        llm_kwargs["api_key"] = google_api_key
+        llm_kwargs["vertexai"] = False
+    else:
+        if not GOOGLE_LLM_LOCATION:
+            raise RuntimeError(
+                "Missing runtime setting: GOOGLE_LLM_LOCATION. "
+                f"Set [agent].GOOGLE_LLM_LOCATION in {DEFAULTS_PATH} when [agent].LLM_PROVIDER is vertex_ai."
+            )
+        if resolved_llm_model == "gemini-3-flash-preview" and GOOGLE_LLM_LOCATION != "global":
+            raise RuntimeError(
+                "Gemini 3 Flash on Vertex AI currently requires GOOGLE_LLM_LOCATION=global."
+            )
+        llm_kwargs["vertexai"] = True
+        llm_kwargs["location"] = GOOGLE_LLM_LOCATION
 
     return google.LLM(
         **llm_kwargs,
@@ -269,6 +355,9 @@ def _build_google_llm() -> google.LLM:
 
 
 def _resolved_tts_voice_name() -> str:
+    if TTS_PROVIDER != "google_cloud":
+        return TTS_VOICE_NAME
+
     agent_gender = (os.getenv("AGENT_GENDER") or "").strip().lower()
     if agent_gender == "male":
         return MALE_TTS_VOICE_NAME
@@ -277,12 +366,20 @@ def _resolved_tts_voice_name() -> str:
     return TTS_VOICE_NAME
 
 
-def _resolved_stt_languages() -> str | list[str]:
+def _resolved_google_stt_languages() -> str | list[str]:
     agent_language = (os.getenv("AGENT_LANGUAGE") or "").strip().lower()
     primary_language = STT_LANGUAGE_BY_AGENT_LANGUAGE.get(agent_language, STT_LANGUAGE)
     if primary_language.lower() == ENGLISH_STT_FALLBACK.lower():
         return primary_language
     return [primary_language, ENGLISH_STT_FALLBACK]
+
+
+def _resolved_cartesia_language() -> str:
+    agent_language = (os.getenv("AGENT_LANGUAGE") or "").strip().lower()
+    candidate = STT_LANGUAGE_BY_AGENT_LANGUAGE.get(agent_language, STT_LANGUAGE)
+    normalized = candidate.strip().replace("_", "-").lower()
+    primary = normalized.split("-", 1)[0]
+    return primary or "en"
 
 
 def _resolved_agent_name() -> str:
@@ -299,29 +396,93 @@ def _agent_identity_system_prompt() -> str:
     return f"Your name is {agent_name}. Your gender is {agent_gender}."
 
 
-def build_agent_session() -> AgentSession:
-    google_credentials_file = _google_credentials_file()
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = google_credentials_file
-    tts_voice_name = _resolved_tts_voice_name()
-    stt_languages = _resolved_stt_languages()
-    detect_language = isinstance(stt_languages, list)
-    return AgentSession(
-        stt=google.STT(
+def _build_stt(
+    google_credentials_file: str | None,
+    *,
+    http_session: aiohttp.ClientSession | None = None,
+):
+    if STT_PROVIDER == "cartesia":
+        return cartesia.STT(
             model=STT_MODEL,
-            location=GOOGLE_STT_LOCATION,
-            languages=stt_languages,
-            detect_language=detect_language,
-            spoken_punctuation=False,
-            use_streaming=STT_USE_STREAMING,
-            credentials_file=google_credentials_file,
-        ),
+            language=_resolved_cartesia_language(),
+            api_key=_cartesia_api_key(),
+            http_session=http_session,
+        )
+
+    if not google_credentials_file:
+        raise RuntimeError("Google credentials are required for Google Cloud STT.")
+    if not GOOGLE_STT_LOCATION:
+        raise RuntimeError(
+            "Missing runtime setting: GOOGLE_STT_LOCATION. "
+            f"Set [agent].GOOGLE_STT_LOCATION in {DEFAULTS_PATH} when "
+            "[agent].STT_PROVIDER is google_cloud."
+        )
+
+    stt_languages = _resolved_google_stt_languages()
+    detect_language = isinstance(stt_languages, list)
+    return google.STT(
+        model=STT_MODEL,
+        location=GOOGLE_STT_LOCATION,
+        languages=stt_languages,
+        detect_language=detect_language,
+        spoken_punctuation=False,
+        use_streaming=STT_USE_STREAMING,
+        credentials_file=google_credentials_file,
+    )
+
+
+def _build_tts(
+    google_credentials_file: str | None,
+    *,
+    http_session: aiohttp.ClientSession | None = None,
+):
+    if TTS_PROVIDER == "cartesia":
+        return cartesia.TTS(
+            api_key=_cartesia_api_key(),
+            model=TTS_MODEL,
+            voice=TTS_VOICE_NAME,
+            language=_resolved_cartesia_language(),
+            http_session=http_session,
+        )
+
+    if TTS_PROVIDER == "deepgram":
+        deepgram_api_key = _required_env(
+            "DEEPGRAM_API_KEY",
+            reason="Set it in config/.env when [agent].TTS_PROVIDER is deepgram.",
+        )
+        return deepgram.TTS(
+            model=TTS_MODEL,
+            api_key=deepgram_api_key,
+        )
+
+    if not google_credentials_file:
+        raise RuntimeError("Google credentials are required for Google Cloud TTS.")
+    tts_voice_name = _resolved_tts_voice_name()
+    return google.TTS(
+        model_name=TTS_MODEL,
+        voice_name=tts_voice_name,
+        use_streaming=True,
+        credentials_file=google_credentials_file,
+    )
+
+
+def build_agent_session(
+    *,
+    http_session: aiohttp.ClientSession | None = None,
+) -> AgentSession:
+    google_credentials_file: str | None = None
+    if (
+        STT_PROVIDER == "google_cloud"
+        or TTS_PROVIDER == "google_cloud"
+        or LLM_PROVIDER == "vertex_ai"
+    ):
+        google_credentials_file = _google_credentials_file()
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = google_credentials_file
+
+    return AgentSession(
+        stt=_build_stt(google_credentials_file, http_session=http_session),
         llm=_build_google_llm(),
-        tts=google.TTS(
-            model_name=TTS_MODEL,
-            voice_name=tts_voice_name,
-            use_streaming=True,
-            credentials_file=google_credentials_file,
-        ),
+        tts=_build_tts(google_credentials_file, http_session=http_session),
         vad=silero.VAD.load(),
         turn_detection="vad",
         min_endpointing_delay=MIN_ENDPOINTING_DELAY,

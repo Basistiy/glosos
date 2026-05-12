@@ -1,0 +1,14 @@
+{
+  "name": "glosos",
+  "version": "0.0.9",
+  "private": true,
+  "scripts": {
+    "start": "node run_token_agent.js",
+    "start:token": "node run_token_agent.js"
+  },
+  "dependencies": {
+    "@firebase/app": "^0.14.4",
+    "@firebase/auth": "^1.11.0",
+    "@firebase/firestore": "^4.9.2"
+  }
+}
