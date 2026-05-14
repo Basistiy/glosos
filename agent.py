@@ -119,7 +119,9 @@ def _provider_setting(name: str, default: str, allowed: set[str]) -> str:
 
 
 STT_MODEL = _required_str_setting("STT_MODEL")
-STT_PROVIDER = _provider_setting("STT_PROVIDER", "google_cloud", {"cartesia", "google_cloud"})
+STT_PROVIDER = _provider_setting(
+    "STT_PROVIDER", "google_cloud", {"cartesia", "deepgram", "google_cloud"}
+)
 LLM_PROVIDER = _provider_setting("LLM_PROVIDER", "vertex_ai", {"google_api", "vertex_ai"})
 LLM_MODEL = _required_str_setting("LLM_MODEL")
 TTS_PROVIDER = _provider_setting(
@@ -169,6 +171,8 @@ def _llm_provider_label() -> str:
 def _stt_provider_label() -> str:
     if STT_PROVIDER == "cartesia":
         return "cartesia"
+    if STT_PROVIDER == "deepgram":
+        return "deepgram"
     return "google-cloud"
 
 
@@ -382,6 +386,14 @@ def _resolved_cartesia_language() -> str:
     return primary or "en"
 
 
+def _resolved_deepgram_language() -> str:
+    agent_language = (os.getenv("AGENT_LANGUAGE") or "").strip().lower()
+    candidate = STT_LANGUAGE_BY_AGENT_LANGUAGE.get(agent_language, STT_LANGUAGE)
+    normalized = candidate.strip().replace("_", "-").lower()
+    primary = normalized.split("-", 1)[0]
+    return primary or "en"
+
+
 def _resolved_agent_name() -> str:
     return (os.getenv("AGENT_NAME") or "").strip()
 
@@ -406,6 +418,18 @@ def _build_stt(
             model=STT_MODEL,
             language=_resolved_cartesia_language(),
             api_key=_cartesia_api_key(),
+            http_session=http_session,
+        )
+
+    if STT_PROVIDER == "deepgram":
+        deepgram_api_key = _required_env(
+            "DEEPGRAM_API_KEY",
+            reason="Set it in config/.env when [agent].STT_PROVIDER is deepgram.",
+        )
+        return deepgram.STT(
+            model=STT_MODEL,
+            language=_resolved_deepgram_language(),
+            api_key=deepgram_api_key,
             http_session=http_session,
         )
 
@@ -453,6 +477,7 @@ def _build_tts(
         return deepgram.TTS(
             model=TTS_MODEL,
             api_key=deepgram_api_key,
+            http_session=http_session,
         )
 
     if not google_credentials_file:

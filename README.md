@@ -51,15 +51,15 @@ endpointing delays are read from `config/defaults.toml` (no env overrides for se
 are also read only from `config/defaults.toml`.
 
 Default provider setup in this repo:
-- STT uses Cartesia credentials from `CARTESIA_API_KEY`
+- STT uses Deepgram credentials from `DEEPGRAM_API_KEY`
 - LLM uses Gemini API credentials from `GOOGLE_API_KEY`
-- TTS uses Cartesia credentials from `CARTESIA_API_KEY`
+- TTS uses Deepgram credentials from `DEEPGRAM_API_KEY`
 
 If you switch `LLM_PROVIDER` to `vertex_ai`, also set `GOOGLE_LLM_LOCATION` in
 `config/defaults.toml`. For Gemini 3 Flash on Vertex AI, `GOOGLE_LLM_LOCATION` must be `global`.
 If you switch `STT_PROVIDER` or `TTS_PROVIDER` to `google_cloud`, set
 `GOOGLE_CREDENTIALS_FILE` to your service account JSON path and keep `GOOGLE_STT_LOCATION`
-configured. If you switch `TTS_PROVIDER` to `deepgram`, set `DEEPGRAM_API_KEY`.
+configured. If you switch `STT_PROVIDER` or `TTS_PROVIDER` to `deepgram`, set `DEEPGRAM_API_KEY`.
 
 Create a local `config/.env` file with secrets used by your chosen mode.
 
@@ -68,13 +68,13 @@ Required for default Firebase launcher mode (`node run_token_agent.js`):
 - `FIREBASE_AUTH_USERNAME` (or `FIREBASE_AUTH_EMAIL`)
 - `FIREBASE_AUTH_PASSWORD`
 - `GOOGLE_API_KEY`
-- `CARTESIA_API_KEY`
+- `DEEPGRAM_API_KEY`
 
 Required for worker mode (`python secret_agent.py`):
 - `LIVEKIT_API_KEY`
 - `LIVEKIT_API_SECRET`
 - `GOOGLE_API_KEY`
-- `CARTESIA_API_KEY`
+- `DEEPGRAM_API_KEY`
 
 Google service-account credentials are needed only when using Google-backed speech or Vertex AI.
 When they are needed, the file path is read from:
